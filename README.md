@@ -10,4 +10,4 @@ This service employs the use of:
 
 ## Sources
 
-When adding sources to the service, the expectation is that the response if a file containing a list of URIs separated by newlines.
+When adding sources to the service, the expectation is that the response is a file containing a list of URIs separated by newlines.
