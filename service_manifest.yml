@@ -1,0 +1,64 @@
+name: NetRep
+version: $SERVICE_TAG
+description: This service provides a reputation about network IOCs.
+
+accepts: .*
+rejects: empty|metadata/.*
+
+stage: SECONDARY
+category: Static Analysis
+
+file_required: false
+timeout: 60
+disable_cache: false
+
+enabled: true
+privileged: true
+is_external: false
+licence_count: 0
+uses_tags: true
+
+heuristics:
+  - heur_id: 1
+    name: Bad Reputation
+    score: 1000
+    filetype: .*
+    description: This IOC is associated to a malware/phishing blocklist
+
+  - heur_id: 2
+    name: Typosquatting
+    score: 500
+    filetype: .*
+    description: This IOC shows evidence of typosquatting of a legitimate domain
+
+  - heur_id: 3
+    name: Phishing
+    score: 500
+    filetype: .*
+    description: This IOC seesm to be phishing-related
+
+
+docker_config:
+  image: ${PRIVATE_REGISTRY}cccs/assemblyline-service-netrep:$SERVICE_TAG
+  cpu_cores: 1
+  ram_mb: 512
+  allow_internet_access: true
+
+dependencies:
+  updates:
+    container:
+      allow_internet_access: true
+      command: ["python", "-m", "netrep.update_server"]
+      image: ${PRIVATE_REGISTRY}cccs/assemblyline-service-netrep:$SERVICE_TAG
+      ports: ["5003"]
+    run_as_core: True
+
+update_config:
+  generates_signatures: false
+  sources:
+    - name: phishunt
+      uri: https://phishunt.io/feed.txt
+    - name: urlhaus
+      uri: https://urlhaus.abuse.ch/downloads/text
+  update_interval_seconds: 900 # Every 15 minutes
+  wait_for_update: true
