@@ -1,3 +1,4 @@
+import csv
 import os
 import re
 from urllib.parse import urlparse
@@ -10,6 +11,9 @@ class NetRepUpdateServer(ServiceUpdater):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         # Load top 1M to reduce FPs when performing source collection
+        top_1m_file = os.environ.get("TOP_1M_CSV", "top-1m.csv")
+        if os.path.exists(top_1m_file):
+            self.top_1m = set(line[1] for line in csv.reader(open(top_1m_file), delimiter=","))
 
     def import_update(self, files_sha256, _, source_name, __):
         for file, _ in files_sha256:
@@ -33,7 +37,9 @@ class NetRepUpdateServer(ServiceUpdater):
                         iocs.setdefault("ip", set()).add(host)
                     else:
                         # Bad Domain? Consult top 1M
-                        iocs.setdefault("domain", set()).add(host)
+                        if host not in self.top_1m:
+                            iocs.setdefault("domain", set()).add(host)
+
                     iocs.setdefault("uri", set()).add(line)
                 except Exception as e:
                     self.log.error(f'Problem parsing "{line}" in file from {source_name}: {e}')
