@@ -113,7 +113,12 @@ class NetRep(ServiceBase):
         # Perform typosquatting checks against top 1M (only applicable to domains)
         typo_table = ResultTableSection("Domain Typosquatting", heuristic=Heuristic(2))
         for domain in iocs["domain"] + [urlparse(uri).hostname for uri in iocs["uri"]]:
-            if re.match(IP_ONLY_REGEX, domain):
+            if not isinstance(domain, str):
+                if domain:
+                    self.log.warning(f"Non-string {domain} found when performing typosquatting check")
+                # Skip if given domain isn't a string
+                continue
+            elif re.match(IP_ONLY_REGEX, domain):
                 # Can't perform typosquatting checks on IPs
                 continue
             elif domain in self.top_1m:
