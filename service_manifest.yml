@@ -21,20 +21,23 @@ uses_tags: true
 heuristics:
   - heur_id: 1
     name: Bad Reputation
-    score: 500
+    score: 1000
     filetype: .*
     description: This IOC is associated to a malware/phishing blocklist
-    signature_score_map:
-      confirmed: 500
-      possibly: 100
 
   - heur_id: 2
+    name: Suspicious Reputation
+    score: 300
+    filetype: .*
+    description: This IOC is associated to a malware/phishing blocklist but is also in the top 1M
+
+  - heur_id: 3
     name: Typosquatting
     score: 500
     filetype: .*
     description: This IOC shows evidence of typosquatting of a legitimate domain
 
-  - heur_id: 3
+  - heur_id: 4
     name: Phishing
     score: 500
     filetype: .*

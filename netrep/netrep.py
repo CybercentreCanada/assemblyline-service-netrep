@@ -9,14 +9,7 @@ from ail_typo_squatting import runAll
 from assemblyline.odm.base import IP_ONLY_REGEX
 from assemblyline_v4_service.common.api import ServiceAPIError
 from assemblyline_v4_service.common.base import ServiceBase
-from assemblyline_v4_service.common.result import (
-    Heuristic,
-    Result,
-    ResultKeyValueSection,
-    ResultSection,
-    ResultTableSection,
-    TableRow,
-)
+from assemblyline_v4_service.common.result import Heuristic, Result, ResultTableSection, TableRow
 
 NETWORK_IOC_TYPES = ["domain", "ip", "uri"]
 
@@ -102,16 +95,13 @@ class NetRep(ServiceBase):
 
             [filter_items(iocs[net_ioc_type]) for net_ioc_type in NETWORK_IOC_TYPES]
 
+        confirmed_ioc_section = ResultTableSection("Confirmed Bad", heuristic=Heuristic(1))
+        possibly_ioc_section = ResultTableSection("Possibly Bad (also exists in top 1M)", heuristic=Heuristic(2))
         # Check to see if IOCs are known to have a bad reputation
         for ioc_type, ioc_values in iocs.items():
             if not ioc_values:
                 continue
 
-            ioc_section = ResultSection(f"{ioc_type.upper()}s")
-            confirmed_ioc_section = ResultKeyValueSection("Confirmed Bad", heuristic=Heuristic(1))
-            possibly_ioc_section = ResultKeyValueSection(
-                "Possibly Bad (domain in top 1M but also in known bad lists)", heuristic=Heuristic(1)
-            )
             for source, bad_ioc_values in self.bad_iocs.get(ioc_type, []):
                 # Determine if any of the IOCs are within the known bad lists
                 potential_bad_iocs = set(ioc_values).intersection(bad_ioc_values)
@@ -126,13 +116,14 @@ class NetRep(ServiceBase):
                     possibly_bad_iocs = potential_bad_iocs.intersection(self.top_1m)
                     confirmed_bad_iocs = potential_bad_iocs - possibly_bad_iocs
 
-                    def populate_section(section: ResultKeyValueSection, iocs: set, signature: str):
+                    def populate_section(section: ResultTableSection, iocs: set, signature: str):
                         self.log.info(
                             f"{ioc_type.upper()}s found with {signature.upper()} bad reputation from {source}"
                         )
 
                         if ioc_type == "uri":
                             # We need to use the URIs that are linked for domain hits
+                            [section.add_tag("network.static.domain", i) for i in iocs]
                             iocs = set(
                                 [
                                     uri
@@ -141,9 +132,13 @@ class NetRep(ServiceBase):
                                 ]
                             )
 
-                        section.set_item(source, list(iocs))
+                        [
+                            section.add_row(
+                                TableRow({"BLOCKLIST SOURCE": source, "IOC": ioc, "TYPE": ioc_type.upper()})
+                            )
+                            for ioc in iocs
+                        ]
                         [section.add_tag(f"network.static.{ioc_type}", i) for i in iocs]
-                        section.heuristic.add_signature_id(signature, frequency=len(iocs))
 
                     # Populate sections
                     if confirmed_bad_iocs:
@@ -152,17 +147,14 @@ class NetRep(ServiceBase):
                     if possibly_bad_iocs:
                         populate_section(possibly_ioc_section, possibly_bad_iocs, "possibly")
 
-            # If there's notable content, append to parent section
-            if confirmed_ioc_section.body:
-                ioc_section.add_subsection(confirmed_ioc_section)
-            if possibly_ioc_section.body:
-                ioc_section.add_subsection(possibly_ioc_section)
-
-            if ioc_section.subsections:
-                result.add_section(ioc_section)
+        # If there's notable content, append to parent section
+        if confirmed_ioc_section.body:
+            result.add_section(confirmed_ioc_section)
+        if possibly_ioc_section.body:
+            result.add_section(possibly_ioc_section)
 
         # Perform typosquatting checks against top 1M (only applicable to domains)
-        typo_table = ResultTableSection("Domain Typosquatting", heuristic=Heuristic(2))
+        typo_table = ResultTableSection("Domain Typosquatting", heuristic=Heuristic(3))
         for domain in iocs["domain"] + [urlparse(uri).hostname for uri in iocs["uri"]]:
             if not isinstance(domain, str):
                 if domain:
@@ -186,7 +178,7 @@ class NetRep(ServiceBase):
                 typo_table.add_tag("network.static.domain", domain)
 
         # Phishing techniques
-        phishing_table = ResultTableSection("Suspected Phishing URIs", heuristic=Heuristic(3))
+        phishing_table = ResultTableSection("Suspected Phishing URIs", heuristic=Heuristic(4))
         for uri in iocs["uri"]:
             parsed_url = urlparse(uri)
 
