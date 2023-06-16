@@ -9,7 +9,14 @@ from ail_typo_squatting import runAll
 from assemblyline.odm.base import IP_ONLY_REGEX
 from assemblyline_v4_service.common.api import ServiceAPIError
 from assemblyline_v4_service.common.base import ServiceBase
-from assemblyline_v4_service.common.result import Heuristic, Result, ResultKeyValueSection, ResultTableSection, TableRow
+from assemblyline_v4_service.common.result import (
+    Heuristic,
+    Result,
+    ResultKeyValueSection,
+    ResultSection,
+    ResultTableSection,
+    TableRow,
+)
 
 NETWORK_IOC_TYPES = ["domain", "ip", "uri"]
 
@@ -100,14 +107,58 @@ class NetRep(ServiceBase):
             if not ioc_values:
                 continue
 
-            ioc_section = ResultKeyValueSection(f"Bad {ioc_type.upper()}s", heuristic=Heuristic(1))
+            ioc_section = ResultSection(f"{ioc_type.upper()}s")
+            confirmed_ioc_section = ResultKeyValueSection("Confirmed Bad", heuristic=Heuristic(1))
+            possibly_ioc_section = ResultKeyValueSection(
+                "Possibly Bad (domain in top 1M but also in known bad lists)", heuristic=Heuristic(1)
+            )
             for source, bad_ioc_values in self.bad_iocs.get(ioc_type, []):
-                confirmed_bad_iocs = set(ioc_values).intersection(bad_ioc_values)
-                if confirmed_bad_iocs:
-                    self.log.info(f"{ioc_type.upper()}s found with a bad reputation from {source}")
-                    ioc_section.set_item(source, list(confirmed_bad_iocs))
-                    [ioc_section.add_tag(f"network.static.{ioc_type}", i) for i in confirmed_bad_iocs]
-            if ioc_section.body:
+                # Determine if any of the IOCs are within the known bad lists
+                potential_bad_iocs = set(ioc_values).intersection(bad_ioc_values)
+                if potential_bad_iocs:
+                    # If there are potential bad IOCs, we need to cross-reference with the top 1M for confirmed bad IOCs
+                    if ioc_type == "uri":
+                        # Extract the host from the URIs to cross-reference with top 1M domains
+                        potential_bad_iocs = set(urlparse(i).hostname for i in potential_bad_iocs)
+
+                    # Determine the set of possibly bad IOCs. Assume all other IOCs to be bad.
+                    # (ie. drive.google.com is in the top 1M but can be used for malicious purposes)
+                    possibly_bad_iocs = potential_bad_iocs.intersection(self.top_1m)
+                    confirmed_bad_iocs = potential_bad_iocs - possibly_bad_iocs
+
+                    def populate_section(section: ResultKeyValueSection, iocs: set, signature: str):
+                        self.log.info(
+                            f"{ioc_type.upper()}s found with {signature.upper()} bad reputation from {source}"
+                        )
+
+                        if ioc_type == "uri":
+                            # We need to use the URIs that are linked for domain hits
+                            iocs = set(
+                                [
+                                    uri
+                                    for uri in set(ioc_values).intersection(bad_ioc_values)
+                                    if any([host in uri for host in iocs])
+                                ]
+                            )
+
+                        section.set_item(source, list(iocs))
+                        [section.add_tag(f"network.static.{ioc_type}", i) for i in iocs]
+                        section.heuristic.add_signature_id(signature, frequency=len(iocs))
+
+                    # Populate sections
+                    if confirmed_bad_iocs:
+                        populate_section(confirmed_ioc_section, confirmed_bad_iocs, "confirmed")
+
+                    if possibly_bad_iocs:
+                        populate_section(possibly_ioc_section, possibly_bad_iocs, "possibly")
+
+            # If there's notable content, append to parent section
+            if confirmed_ioc_section.body:
+                ioc_section.add_subsection(confirmed_ioc_section)
+            if possibly_ioc_section.body:
+                ioc_section.add_subsection(possibly_ioc_section)
+
+            if ioc_section.subsections:
                 result.add_section(ioc_section)
 
         # Perform typosquatting checks against top 1M (only applicable to domains)
