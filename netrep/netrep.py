@@ -1,4 +1,5 @@
 import csv
+import json
 import math
 import os
 import re
@@ -57,12 +58,8 @@ class NetRep(ServiceBase):
         self.bad_iocs = dict()
 
     def _load_rules(self) -> None:
-        for rule_file in self.rules_list:
-            self.log.debug(f"Parsing {rule_file}")
-            source, ioc_type = rule_file.split(os.sep)[-2:]
-            self.bad_iocs.setdefault(ioc_type, list()).append(
-                (source, set([r.strip() for r in open(rule_file, "r").readlines()]))
-            )
+        if os.path.exists(os.path.join(self.rules_directory, "blocklist.json")):
+            self.bad_iocs = json.load(open(os.path.join(self.rules_directory, "blocklist.json")))
 
         if self.bad_iocs:
             self.log.debug(self.bad_iocs)
@@ -102,50 +99,60 @@ class NetRep(ServiceBase):
             if not ioc_values:
                 continue
 
-            for source, bad_ioc_values in self.bad_iocs.get(ioc_type, []):
-                # Determine if any of the IOCs are within the known bad lists
-                potential_bad_iocs = set(ioc_values).intersection(bad_ioc_values)
-                if potential_bad_iocs:
-                    # If there are potential bad IOCs, we need to cross-reference with the top 1M for confirmed bad IOCs
+            # Determine if any of the IOCs are within the known bad lists
+            bad_ioc_values = set(self.bad_iocs.get(ioc_type, {}).keys())
+            potential_bad_iocs = set(ioc_values).intersection(bad_ioc_values)
+            if potential_bad_iocs:
+                # If there are potential bad IOCs, we need to cross-reference with the top 1M for confirmed bad IOCs
+                if ioc_type == "uri":
+                    # Extract the host from the URIs to cross-reference with top 1M domains
+                    potential_bad_iocs = set(urlparse(i).hostname for i in potential_bad_iocs)
+
+                # Determine the set of possibly bad IOCs. Assume all other IOCs to be bad.
+                # (ie. drive.google.com is in the top 1M but can be used for malicious purposes)
+                possibly_bad_iocs = potential_bad_iocs.intersection(self.top_1m)
+                confirmed_bad_iocs = potential_bad_iocs - possibly_bad_iocs
+
+                def populate_section(section: ResultTableSection, iocs: set, signature: str):
+                    self.log.info(f"{ioc_type.upper()}s found with {signature.upper()} bad reputation")
                     if ioc_type == "uri":
-                        # Extract the host from the URIs to cross-reference with top 1M domains
-                        potential_bad_iocs = set(urlparse(i).hostname for i in potential_bad_iocs)
-
-                    # Determine the set of possibly bad IOCs. Assume all other IOCs to be bad.
-                    # (ie. drive.google.com is in the top 1M but can be used for malicious purposes)
-                    possibly_bad_iocs = potential_bad_iocs.intersection(self.top_1m)
-                    confirmed_bad_iocs = potential_bad_iocs - possibly_bad_iocs
-
-                    def populate_section(section: ResultTableSection, iocs: set, signature: str):
-                        self.log.info(
-                            f"{ioc_type.upper()}s found with {signature.upper()} bad reputation from {source}"
+                        # We need to use the URIs that are linked for domain hits
+                        [
+                            section.add_tag(f"network.static.{'ip' if re.match(IP_ONLY_REGEX, i) else 'domain'}", i)
+                            for i in iocs
+                        ]
+                        iocs = set(
+                            [
+                                uri
+                                for uri in set(ioc_values).intersection(bad_ioc_values)
+                                if any([host in uri for host in iocs])
+                            ]
                         )
 
-                        if ioc_type == "uri":
-                            # We need to use the URIs that are linked for domain hits
-                            [section.add_tag("network.static.domain", i) for i in iocs]
-                            iocs = set(
-                                [
-                                    uri
-                                    for uri in set(ioc_values).intersection(bad_ioc_values)
-                                    if any([host in uri for host in iocs])
-                                ]
-                            )
-
-                        [
-                            section.add_row(
-                                TableRow({"BLOCKLIST SOURCE": source, "IOC": ioc, "TYPE": ioc_type.upper()})
-                            )
-                            for ioc in iocs
+                    for ioc in iocs:
+                        source = self.bad_iocs[ioc_type].get(ioc, {}).get("source", [])
+                        malware_family = [
+                            f.upper() for f in self.bad_iocs[ioc_type].get(ioc, {}).get("malware_family", [])
                         ]
-                        [section.add_tag(f"network.static.{ioc_type}", i) for i in iocs]
+                        section.add_row(
+                            TableRow(
+                                {
+                                    "BLOCKLIST SOURCE(S)": source,
+                                    "IOC": ioc,
+                                    "TYPE": ioc_type.upper(),
+                                    "MALWARE_FAMILY": malware_family,
+                                }
+                            )
+                        )
+                        [section.add_tag("attribution.family", f) for f in malware_family]
+                    [section.add_tag(f"network.static.{ioc_type}", i) for i in iocs]
 
-                    # Populate sections
-                    if confirmed_bad_iocs:
-                        populate_section(confirmed_ioc_section, confirmed_bad_iocs, "confirmed")
+                # Populate sections
+                if confirmed_bad_iocs:
+                    populate_section(confirmed_ioc_section, confirmed_bad_iocs, "confirmed")
 
-                    if possibly_bad_iocs:
-                        populate_section(possibly_ioc_section, possibly_bad_iocs, "possibly")
+                if possibly_bad_iocs:
+                    populate_section(possibly_ioc_section, possibly_bad_iocs, "possibly")
 
         # If there's notable content, append to parent section
         if confirmed_ioc_section.body:

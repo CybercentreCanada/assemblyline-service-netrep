@@ -41,8 +41,38 @@ heuristics:
     name: Phishing
     score: 500
     filetype: .*
-    description: This IOC seesm to be phishing-related
+    description: This IOC seems to be phishing-related
 
+config:
+  updater:
+    phishunt:
+      type: blocklist
+      format: csv
+      uri: 0
+      start: 0
+    urlhaus:
+      type: blocklist
+      format: csv
+      uri: 2
+      malware_family: 6
+      start: 9
+    blackbook:
+      type: blocklist
+      format: csv
+      domain: 0
+      malware_family: 1
+      start: 1
+    tweetfeed:
+      type: blocklist
+      format: csv
+      ip: 3
+      uri: 3
+      domain: 3
+      malware_family: 4
+      start: 0
+    malpedia:
+      type: malware_family_list
+      format: list
 
 docker_config:
   image: ${PRIVATE_REGISTRY}cccs/assemblyline-service-netrep:$SERVICE_TAG
@@ -62,9 +92,20 @@ dependencies:
 update_config:
   generates_signatures: false
   sources:
+    - name: malpedia
+      uri: https://malpedia.caad.fkie.fraunhofer.de/api/list/families?format=json
+      pattern: .*\/families
     - name: phishunt
       uri: https://phishunt.io/feed.txt
+      pattern: .*\/feed\.txt
     - name: urlhaus
-      uri: https://urlhaus.abuse.ch/downloads/text
+      uri: https://urlhaus.abuse.ch/downloads/csv
+      pattern: .*\/csv$
+    - name: tweetfeed
+      uri: https://github.com/0xDanielLopez/TweetFeed.git
+      pattern: .*\.csv$
+    - name: blackbook
+      uri: https://github.com/stamparm/blackbook.git
+      pattern: .*\.csv$
   update_interval_seconds: 900 # Every 15 minutes
   wait_for_update: true
