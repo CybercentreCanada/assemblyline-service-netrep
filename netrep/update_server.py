@@ -122,10 +122,6 @@ class NetRepUpdateServer(ServiceUpdater):
 
                             update_blocklist(ioc_type, ioc_value, malware_family)
 
-                # Commit blocklist to disk to send to service
-                with open(self.blocklist_path, "w") as fp:
-                    fp.write(json.dumps(self.blocklist, cls=SetEncoder))
-
             elif source_cfg["format"] == "json":
                 for file, _ in files_sha256:
                     with open(file, "r") as fp:
@@ -137,6 +133,10 @@ class NetRepUpdateServer(ServiceUpdater):
                                     ioc_value = data.get(source_cfg.get(ioc_type))
                                     if ioc_value:
                                         update_blocklist(ioc_type, ioc_value, malware_family)
+
+            # Commit blocklist to disk to send to service
+            with open(self.blocklist_path, "w") as fp:
+                fp.write(json.dumps(self.blocklist, cls=SetEncoder))
 
         elif source_cfg["type"] == "malware_family_list":
             # This source is meant to contributes to the list of valid malware families
