@@ -49,7 +49,6 @@ config:
       type: blocklist
       format: csv
       uri: 0
-      start: 0
     urlhaus:
       type: blocklist
       format: csv
@@ -69,7 +68,12 @@ config:
       uri: 3
       domain: 3
       malware_family: 4
-      start: 0
+    feodotracker:
+      type: blocklist
+      format: json
+      ip: ip_address
+      domain: hostname
+      malware_family: malware
     malpedia:
       type: malware_family_list
       format: list
@@ -87,6 +91,7 @@ dependencies:
       command: ["python", "-m", "netrep.update_server"]
       image: ${PRIVATE_REGISTRY}cccs/assemblyline-service-netrep:$SERVICE_TAG
       ports: ["5003"]
+      ram_mb: 4096
     run_as_core: True
 
 update_config:
@@ -107,5 +112,8 @@ update_config:
     - name: blackbook
       uri: https://github.com/stamparm/blackbook.git
       pattern: .*\.csv$
+    - name: feodotracker
+      uri: https://feodotracker.abuse.ch/downloads/ipblocklist.json
+      pattern: .*ipblocklist\.json
   update_interval_seconds: 900 # Every 15 minutes
   wait_for_update: true

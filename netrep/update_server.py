@@ -1,6 +1,8 @@
 import json
 import os
 import re
+from collections import defaultdict
+from typing import Dict, List, Set
 
 from assemblyline.odm.base import DOMAIN_ONLY_REGEX, FULL_URI, IP_ONLY_REGEX
 from assemblyline_v4_service.updater.updater import ServiceUpdater
@@ -16,17 +18,31 @@ IOC_CHECK = {
 IOC_TYPES = ["ip", "domain", "uri"]
 
 
+def default_ioc_blocklist():
+    def default_blocklist_item():
+        return dict(malware_family=set(), source=set())
+
+    return defaultdict(default_blocklist_item)
+
+
+class SetEncoder(json.JSONEncoder):
+    def default(self, o):
+        if isinstance(o, set):
+            return list(o)
+        return json.JSONEncoder.default(self, o)
+
+
 class NetRepUpdateServer(ServiceUpdater):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.malware_families_path = os.path.join(self.latest_updates_dir, "malware_families.json")
-        self.blocklist_path = os.path.join(self.latest_updates_dir, "blocklist.json")
-        self.malware_families = list()
-        self.blocklist = dict()
+        self.malware_families_path: str = os.path.join(self.latest_updates_dir, "malware_families.json")
+        self.blocklist_path: str = os.path.join(self.latest_updates_dir, "blocklist.json")
+        self.malware_families: Set[str] = set()
+        self.blocklist: Dict[str, Dict[str, Dict[str, Set[str]]]] = defaultdict(default_ioc_blocklist)
 
         if os.path.exists(self.malware_families_path):
             with open(self.malware_families_path, "r") as fp:
-                self.malware_families = json.load(fp)
+                self.malware_families = set(json.load(fp))
         if os.path.exists(self.blocklist_path):
             with open(self.blocklist_path, "r") as fp:
                 self.blocklist = json.load(fp)
@@ -39,14 +55,32 @@ class NetRepUpdateServer(ServiceUpdater):
         return os.path.exists(self.blocklist_path)
 
     def import_update(self, files_sha256, _, source_name, __):
-        def normalize_malware_family(data: str) -> str:
+        def get_malware_families(data: str, validate=True) -> List[str]:
+            if not data:
+                return []
+
             # Normalize data (parsing based off Malpedia API output)
-            return data.replace("-", "").replace("_", "").replace("#", "").lower()
+            malware_family = data.replace("-", "").replace("_", "").replace("#", "").lower()
+            if "," in malware_family:
+                malware_family = malware_family.split(",")
+            else:
+                malware_family = [malware_family]
+
+            if not validate:
+                return malware_family
+            else:
+                return [m for m in malware_family if m in self.malware_families]
 
         def ioc_type_check(data: str) -> str:
             for type, func in IOC_CHECK.items():
                 if func(data):
                     return type
+
+        def update_blocklist(ioc_type, ioc_value, malware_family):
+            blocklist_item = self.blocklist[ioc_type][ioc_value]
+            blocklist_item["source"].add(source_name)
+            blocklist_item["malware_family"] = blocklist_item["malware_family"].union(set(malware_family))
+            self.blocklist[ioc_type][ioc_value] = blocklist_item
 
         source_cfg = self._service.config["updater"][source_name]
 
@@ -84,32 +118,25 @@ class NetRepUpdateServer(ServiceUpdater):
                                     ioc_value = data
                                 elif field_type == "malware_family":
                                     # Try to extract the malware family name if we can
-                                    norm_mf = normalize_malware_family(data)
-                                    if "," not in norm_mf:
-                                        norm_mf = [norm_mf]
-                                    else:
-                                        norm_mf = norm_mf.split(",")
+                                    malware_family = get_malware_families(data)
 
-                                    for term in norm_mf:
-                                        if term in self.malware_families:
-                                            malware_family.append(term)
-                            self.blocklist.setdefault(ioc_type, {}).setdefault(ioc_value, {})
-                            self.blocklist[ioc_type][ioc_value].setdefault("malware_family", [])
-                            self.blocklist[ioc_type][ioc_value].setdefault("source", [])
-
-                            if source_name not in self.blocklist[ioc_type][ioc_value]["source"]:
-                                self.blocklist[ioc_type][ioc_value]["source"].append(source_name)
-
-                            if (
-                                malware_family
-                                and malware_family not in self.blocklist[ioc_type][ioc_value]["malware_family"]
-                            ):
-                                self.blocklist[ioc_type][ioc_value]["malware_family"] = list(
-                                    set(self.blocklist[ioc_type][ioc_value]["malware_family"] + malware_family)
-                                )
+                            update_blocklist(ioc_type, ioc_value, malware_family)
 
                 # Commit blocklist to disk to send to service
-                open(self.blocklist_path, "w").write(json.dumps(self.blocklist))
+                with open(self.blocklist_path, "w") as fp:
+                    fp.write(json.dumps(self.blocklist, cls=SetEncoder))
+
+            elif source_cfg["format"] == "json":
+                for file, _ in files_sha256:
+                    with open(file, "r") as fp:
+                        blocklist_data = json.load(fp)
+                        if isinstance(blocklist_data, list):
+                            for data in blocklist_data:
+                                malware_family = get_malware_families(data.get(source_cfg.get("malware_family")))
+                                for ioc_type in IOC_TYPES:
+                                    ioc_value = data.get(source_cfg.get(ioc_type))
+                                    if ioc_value:
+                                        update_blocklist(ioc_type, ioc_value, malware_family)
 
         elif source_cfg["type"] == "malware_family_list":
             # This source is meant to contributes to the list of valid malware families
@@ -117,16 +144,15 @@ class NetRepUpdateServer(ServiceUpdater):
                 # Expect a flat list containing a series to malware family names
                 for file, _ in files_sha256:
                     # Add normalized family names to list
-                    [
-                        self.malware_families.append(normalize_malware_family(malware_family.split(".", 1)[1]))
-                        for malware_family in json.load(open(file, "r"))
-                    ]
-
-            # Eliminate duplicates
-            self.malware_families = list(set(self.malware_families))
+                    with open(file, "r") as fp:
+                        for malware_family in json.load(fp):
+                            self.malware_families = self.malware_families.union(
+                                set(get_malware_families(malware_family.split(".", 1)[1], validate=False))
+                            )
 
             # Commit list to disk
-            open(self.malware_families_path, "w").write(json.dumps(self.malware_families))
+            with open(self.malware_families_path, "w") as fp:
+                fp.write(json.dumps(self.malware_families, cls=SetEncoder))
 
         # for file, _ in files_sha256:
         #     # Parse file containing URIs, extract domains and IPs

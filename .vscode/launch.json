@@ -26,7 +26,7 @@
             "env": {
                 "SERVICE_PATH": "netrep.netrep.NetRep",
                 "AL_SERVICE_NAME": "NetRep",
-                "UI_SERVER": "https:/nginx/"
+                "UI_SERVER": "https://nginx/"
             },
             "justMyCode": false,
         },
