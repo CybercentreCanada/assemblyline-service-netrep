@@ -45,7 +45,7 @@ class NetRepUpdateServer(ServiceUpdater):
                 self.malware_families = set(json.load(fp))
         if os.path.exists(self.blocklist_path):
             with open(self.blocklist_path, "r") as fp:
-                self.blocklist = json.load(fp)
+                self.blocklist.update(json.load(fp))
 
         self.log.info(f"{len(self.malware_families)} malware families loaded at startup")
 
