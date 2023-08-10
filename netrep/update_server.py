@@ -78,6 +78,10 @@ class NetRepUpdateServer(ServiceUpdater):
 
         def update_blocklist(ioc_type, ioc_value, malware_family):
             blocklist_item = self.blocklist[ioc_type][ioc_value]
+            if isinstance(blocklist_item["source"], list) or isinstance(blocklist_item["malware_family"], list):
+                # Account for cases where we've loaded the cached blocklist from disk using json.load
+                blocklist_item["source"] = set(blocklist_item["source"])
+                blocklist_item["malware_family"] = set(blocklist_item["malware_family"])
             blocklist_item["source"].add(source_name)
             blocklist_item["malware_family"] = blocklist_item["malware_family"].union(set(malware_family))
             self.blocklist[ioc_type][ioc_value] = blocklist_item
