@@ -81,7 +81,7 @@ config:
 docker_config:
   image: ${PRIVATE_REGISTRY}cccs/assemblyline-service-netrep:$SERVICE_TAG
   cpu_cores: 1
-  ram_mb: 512
+  ram_mb: 2048
   allow_internet_access: true
 
 dependencies:
