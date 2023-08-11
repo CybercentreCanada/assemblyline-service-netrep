@@ -1,7 +1,6 @@
 import json
 import os
 import re
-from collections import defaultdict
 from typing import Dict, List, Set
 
 from assemblyline.odm.base import DOMAIN_ONLY_REGEX, FULL_URI, IP_ONLY_REGEX
@@ -18,13 +17,6 @@ IOC_CHECK = {
 IOC_TYPES = ["ip", "domain", "uri"]
 
 
-def default_ioc_blocklist():
-    def default_blocklist_item():
-        return dict(malware_family=set(), source=set())
-
-    return defaultdict(default_blocklist_item)
-
-
 class SetEncoder(json.JSONEncoder):
     def default(self, o):
         if isinstance(o, set):
@@ -38,7 +30,7 @@ class NetRepUpdateServer(ServiceUpdater):
         self.malware_families_path: str = os.path.join(self.latest_updates_dir, "malware_families.json")
         self.blocklist_path: str = os.path.join(self.latest_updates_dir, "blocklist.json")
         self.malware_families: Set[str] = set()
-        self.blocklist: Dict[str, Dict[str, Dict[str, Set[str]]]] = defaultdict(default_ioc_blocklist)
+        self.blocklist: Dict[str, Dict[str, Dict[str, Set[str]]]] = dict()
 
         if os.path.exists(self.malware_families_path):
             with open(self.malware_families_path, "r") as fp:
@@ -77,6 +69,8 @@ class NetRepUpdateServer(ServiceUpdater):
                     return type
 
         def update_blocklist(ioc_type, ioc_value, malware_family):
+            self.blocklist.setdefault(ioc_type, {}).setdefault(ioc_value, {"source": set(), "malware_family": set()})
+
             blocklist_item = self.blocklist[ioc_type][ioc_value]
             if isinstance(blocklist_item["source"], list) or isinstance(blocklist_item["malware_family"], list):
                 # Account for cases where we've loaded the cached blocklist from disk using json.load

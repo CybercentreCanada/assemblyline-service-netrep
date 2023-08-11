@@ -24,6 +24,7 @@
             "module": "netrep.update_server",
             "cwd": "${workspaceFolder}",
             "env": {
+                "UPDATER_DIR": "${workspaceFolder}/updates",
                 "SERVICE_PATH": "netrep.netrep.NetRep",
                 "AL_SERVICE_NAME": "NetRep",
                 "UI_SERVER": "https://nginx/"
