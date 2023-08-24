@@ -110,13 +110,6 @@ class NetRepUpdateServer(ServiceUpdater):
         if source_cfg["type"] == "blocklist":
             # This source is meant to contribute to the blocklist
             if source_cfg["format"] == "csv":
-                data_map = dict()
-                [
-                    data_map.setdefault(source_cfg[data], []).append(data)
-                    for data in ["uri", "ip", "domain", "malware_family"]
-                    if source_cfg.get(data) is not None
-                ]
-
                 start_index = source_cfg.get("start", 0)
                 for file, _ in files_sha256:
                     with open(file, "r") as fp:
@@ -125,25 +118,25 @@ class NetRepUpdateServer(ServiceUpdater):
                                 row_data = [r.strip('"') for r in row.split('","')]
                             else:
                                 row_data = row.split(",")
-                            ioc_type, ioc_value, malware_family = None, None, []
-                            for data_index, data_fields in data_map.items():
-                                # Get data from index
-                                data = row_data[data_index]
-                                field_type = data_fields[0]
-                                if len(data_fields) > 1:
-                                    # Multiple types are selected for this column
-                                    # Perform validation to see which one it likely belongs to
-                                    field_type = ioc_type_check(data)
 
-                                if field_type in IOC_TYPES:
-                                    # Set IOC values
-                                    ioc_type = field_type
-                                    ioc_value = data
-                                elif field_type == "malware_family":
-                                    # Try to extract the malware family name if we can
-                                    malware_family = get_malware_families(data)
+                            # Get malware family
+                            malware_family = (
+                                get_malware_families(
+                                    row_data[source_cfg["malware_family"]]
+                                )
+                                if source_cfg.get("malware_family")
+                                else []
+                            )
 
-                            if ioc_value:
+                            # Iterate over all IOC types
+                            for ioc_type in IOC_TYPES:
+                                if source_cfg.get(ioc_type) == None:
+                                    continue
+                                ioc_value = row_data[source_cfg[ioc_type]]
+
+                                # If there are multiple IOC types in the same column, verify the IOC type
+                                if not IOC_CHECK[ioc_type](ioc_value):
+                                    continue
                                 update_blocklist(ioc_type, ioc_value, malware_family)
 
             elif source_cfg["format"] == "json":
@@ -181,6 +174,7 @@ class NetRepUpdateServer(ServiceUpdater):
             # Commit list to disk
             with open(self.malware_families_path, "w") as fp:
                 fp.write(json.dumps(self.malware_families, cls=SetEncoder))
+            return
 
         # Page through the URI table and flag hosts that aren't in the top 1M
         for record in self.blocklist.table("uri").all():
