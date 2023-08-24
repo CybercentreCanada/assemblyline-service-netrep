@@ -10,4 +10,48 @@ This service employs the use of:
 
 ## Sources
 
-When adding sources to the service, the expectation is that the response is a file containing a list of URIs separated by newlines.
+When adding sources to the service, there are two types of expected data formats
+
+- csv
+- json
+
+There are also two types of sources for this service:
+
+- blocklist
+- malware_family_list
+
+### Blocklist Data Formats
+
+In order for the service to pull the right IOCs and categorize them per source, you'll have to instruct it on how to using the `config.updater.<source>` key.
+
+Within each `source` map, you'll specify the type of source this is (`blocklist`) as well as set the format (`json` | `csv`).
+
+You'll also have to specify the different IOC types (`domain`, `ip`, `uri`) you expect to find in the data and where.
+
+For example if dealing with a CSV file and you expect to find `uri`s in the 3rd column per row:
+
+ie. "`<date>,<name>,https://google.com,...`"
+
+Then your source configuration will look like:
+
+```yaml
+config:
+  updater:
+    my_source:
+      type: blocklist
+      format: csv
+      uri: 2
+```
+
+Similarly, if you're dealing with a JSON list (`[{}, {}, ...]`) and you know to find `uri`s under the key `bad_uri` in each record:
+
+ie. `{"bad_uri": "https://google.com", "family": "bad_stuff", ...}`
+
+```yaml
+config:
+  updater:
+    my_source:
+      type: blocklist
+      format: json
+      uri: "bad_uri"
+```
