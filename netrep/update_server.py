@@ -1,10 +1,14 @@
+import csv
 import json
 import os
 import re
-from typing import Dict, List, Set
+from typing import List, Set
+from urllib.parse import urlparse
 
 from assemblyline.odm.base import DOMAIN_ONLY_REGEX, FULL_URI, IP_ONLY_REGEX
 from assemblyline_v4_service.updater.updater import ServiceUpdater
+from tinydb import TinyDB
+from tinydb.database import Document
 
 IOC_CHECK = {
     "ip": re.compile(IP_ONLY_REGEX).match,
@@ -27,24 +31,33 @@ class SetEncoder(json.JSONEncoder):
 class NetRepUpdateServer(ServiceUpdater):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.malware_families_path: str = os.path.join(self.latest_updates_dir, "malware_families.json")
-        self.blocklist_path: str = os.path.join(self.latest_updates_dir, "blocklist.json")
+        self.top_1m: Set[str] = set()
+        top_1m_file = os.environ.get("TOP_1M_CSV", "top-1m.csv")
+        if os.path.exists(top_1m_file):
+            self.top_1m = set(
+                line[1] for line in csv.reader(open(top_1m_file), delimiter=",")
+            )
+
+        self.malware_families_path: str = os.path.join(
+            self.latest_updates_dir, "malware_families.json"
+        )
+        self.blocklist = TinyDB(os.path.join(self.latest_updates_dir, "blocklist.json"))
+        # We're going to use the IOC value as the doc_ids
+        self.blocklist.table_class.document_id_class = str
+
         self.malware_families: Set[str] = set()
-        self.blocklist: Dict[str, Dict[str, Dict[str, Set[str]]]] = dict()
 
         if os.path.exists(self.malware_families_path):
             with open(self.malware_families_path, "r") as fp:
                 self.malware_families = set(json.load(fp))
-        if os.path.exists(self.blocklist_path):
-            with open(self.blocklist_path, "r") as fp:
-                self.blocklist.update(json.load(fp))
 
-        self.log.info(f"{len(self.malware_families)} malware families loaded at startup")
+        self.log.info(
+            f"{len(self.malware_families)} malware families loaded at startup"
+        )
 
     # A sanity check to make sure we do in fact have things to send to services
     def _inventory_check(self) -> bool:
-        self.log.info(self.blocklist_path)
-        return os.path.exists(self.blocklist_path)
+        return len(self.blocklist)
 
     def import_update(self, files_sha256, _, source_name, __):
         def get_malware_families(data: str, validate=True) -> List[str]:
@@ -52,7 +65,9 @@ class NetRepUpdateServer(ServiceUpdater):
                 return []
 
             # Normalize data (parsing based off Malpedia API output)
-            malware_family = data.replace("-", "").replace("_", "").replace("#", "").lower()
+            malware_family = (
+                data.replace("-", "").replace("_", "").replace("#", "").lower()
+            )
             if "," in malware_family:
                 malware_family = malware_family.split(",")
             else:
@@ -69,16 +84,26 @@ class NetRepUpdateServer(ServiceUpdater):
                     return type
 
         def update_blocklist(ioc_type, ioc_value, malware_family):
-            self.blocklist.setdefault(ioc_type, {}).setdefault(ioc_value, {"source": set(), "malware_family": set()})
+            table = self.blocklist.table(ioc_type)
 
-            blocklist_item = self.blocklist[ioc_type][ioc_value]
-            if isinstance(blocklist_item["source"], list) or isinstance(blocklist_item["malware_family"], list):
-                # Account for cases where we've loaded the cached blocklist from disk using json.load
-                blocklist_item["source"] = set(blocklist_item["source"])
-                blocklist_item["malware_family"] = set(blocklist_item["malware_family"])
-            blocklist_item["source"].add(source_name)
-            blocklist_item["malware_family"] = blocklist_item["malware_family"].union(set(malware_family))
-            self.blocklist[ioc_type][ioc_value] = blocklist_item
+            # Check if we've seen this IOC before
+            doc = table.get(doc_id=ioc_value)
+            if doc:
+                # Document already exists, therefore update
+                doc["malware_family"] = list(
+                    set(doc["malware_family"] + malware_family)
+                )
+                doc["source"] = list(set(doc["source"] + [source_name]))
+            else:
+                # Document has yet to exist, therefore create
+                doc = Document(
+                    dict(
+                        malware_family=malware_family,
+                        source=[source_name],
+                    ),
+                    doc_id=ioc_value,
+                )
+            table.upsert(doc)
 
         source_cfg = self._service.config["updater"][source_name]
 
@@ -118,7 +143,8 @@ class NetRepUpdateServer(ServiceUpdater):
                                     # Try to extract the malware family name if we can
                                     malware_family = get_malware_families(data)
 
-                            update_blocklist(ioc_type, ioc_value, malware_family)
+                            if ioc_value:
+                                update_blocklist(ioc_type, ioc_value, malware_family)
 
             elif source_cfg["format"] == "json":
                 for file, _ in files_sha256:
@@ -126,15 +152,15 @@ class NetRepUpdateServer(ServiceUpdater):
                         blocklist_data = json.load(fp)
                         if isinstance(blocklist_data, list):
                             for data in blocklist_data:
-                                malware_family = get_malware_families(data.get(source_cfg.get("malware_family")))
+                                malware_family = get_malware_families(
+                                    data.get(source_cfg.get("malware_family"))
+                                )
                                 for ioc_type in IOC_TYPES:
                                     ioc_value = data.get(source_cfg.get(ioc_type))
                                     if ioc_value:
-                                        update_blocklist(ioc_type, ioc_value, malware_family)
-
-            # Commit blocklist to disk to send to service
-            with open(self.blocklist_path, "w") as fp:
-                fp.write(json.dumps(self.blocklist, cls=SetEncoder))
+                                        update_blocklist(
+                                            ioc_type, ioc_value, malware_family
+                                        )
 
         elif source_cfg["type"] == "malware_family_list":
             # This source is meant to contributes to the list of valid malware families
@@ -145,48 +171,36 @@ class NetRepUpdateServer(ServiceUpdater):
                     with open(file, "r") as fp:
                         for malware_family in json.load(fp):
                             self.malware_families = self.malware_families.union(
-                                set(get_malware_families(malware_family.split(".", 1)[1], validate=False))
+                                set(
+                                    get_malware_families(
+                                        malware_family.split(".", 1)[1], validate=False
+                                    )
+                                )
                             )
 
             # Commit list to disk
             with open(self.malware_families_path, "w") as fp:
                 fp.write(json.dumps(self.malware_families, cls=SetEncoder))
 
-        # for file, _ in files_sha256:
-        #     # Parse file containing URIs, extract domains and IPs
-        #     iocs = dict()
-
-        #     # Collect any previous collected IOCs so we don't lose any between updates
-        #     for ioc in ["ip", "domain", "uri"]:
-        #         if os.path.exists(os.path.join(self.latest_updates_dir, source_name, ioc)):
-        #             iocs[ioc] = set(open(os.path.join(self.latest_updates_dir, source_name, ioc), "r").readlines())
-
-        #     for line in open(file, "r"):
-        #         if line.startswith("#"):
-        #             # Presumably some commenting from source (ie. urlhaus)
-        #             continue
-        #         line = line.strip()
-        #         try:
-        #             host = urlparse(line).hostname
-        #             if re.match(IP_ONLY_REGEX, host):
-        #                 # Bad IP
-        #                 iocs.setdefault("ip", set()).add(host)
-        #             else:
-        #                 # Bad Domain?
-        #                 iocs.setdefault("domain", set()).add(host)
-
-        #             iocs.setdefault("uri", set()).add(line)
-        #         except Exception as e:
-        #             self.log.error(f'Problem parsing "{line}" in file from {source_name}: {e}')
-
-        #     for ioc_type, ioc_values in iocs.items():
-        #         # Store the IOCs in their respective source to make it easier to track
-        #         if ioc_values:
-        #             if not os.path.exists(os.path.join(self.latest_updates_dir, source_name)):
-        #                 os.makedirs(os.path.join(self.latest_updates_dir, source_name))
-
-        #             with open(os.path.join(self.latest_updates_dir, source_name, ioc_type), "w") as bl_writer:
-        #                 bl_writer.write("\n".join(ioc_values))
+        # Page through the URI table and flag hosts that aren't in the top 1M
+        for record in self.blocklist.table("uri").all():
+            # Is this IOC definitely malicious or questionable?
+            # (ie. drive.google.com is in the top 1M but can be used for malicious purposes)
+            hostname = urlparse(record.doc_id).hostname
+            for ioc_type, check in IOC_CHECK.items():
+                if check(hostname):
+                    if self.blocklist.table(ioc_type).get(doc_id=hostname):
+                        # Host is already known to be bad on another list
+                        pass
+                    else:
+                        # Check to see if the host is known in the top 1M
+                        if hostname not in self.top_1m:
+                            # If this isn't in the top 1M, assume the domain is outright malicious
+                            # So properties of this maliciousness will be transferred
+                            update_blocklist(
+                                ioc_type, hostname, record["malware_family"]
+                            )
+                    break
 
 
 if __name__ == "__main__":

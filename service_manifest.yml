@@ -105,7 +105,7 @@ update_config:
       pattern: .*\/feed\.txt
     - name: urlhaus
       uri: https://urlhaus.abuse.ch/downloads/csv
-      pattern: .*\/csv$
+      pattern: .*\/csv\.txt$
     - name: tweetfeed
       uri: https://github.com/0xDanielLopez/TweetFeed.git
       pattern: .*\.csv$
