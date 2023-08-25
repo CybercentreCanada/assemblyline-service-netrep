@@ -6,7 +6,7 @@ ENV SERVICE_PATH netrep.netrep.NetRep
 USER root
 
 RUN apt update -y && apt install -y wget unzip
-RUN pip install ail-typo-squatting tinydb
+RUN pip install ail-typo-squatting
 
 WORKDIR  /tmp
 RUN wget https://s3-us-west-1.amazonaws.com/umbrella-static/top-1m.csv.zip \

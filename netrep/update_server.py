@@ -7,7 +7,6 @@ from urllib.parse import urlparse
 
 from assemblyline.odm.base import DOMAIN_ONLY_REGEX, FULL_URI, IP_ONLY_REGEX
 from assemblyline_v4_service.updater.updater import ServiceUpdater
-from tinydb import TinyDB
 
 IOC_CHECK = {
     "ip": re.compile(IP_ONLY_REGEX).match,
@@ -53,14 +52,26 @@ class NetRepUpdateServer(ServiceUpdater):
 
     # A sanity check to make sure we do in fact have things to send to services
     def _inventory_check(self) -> bool:
-        with TinyDB(self.blocklist_path) as blocklist:
-            if not blocklist.tables():
-                # If there are no tables in the database, trigger an update of all sources
-                for source in [_s.name for _s in self._service.update_config.sources]:
-                    self._current_source = source
-                    self.set_source_update_time(0)
-                self.trigger_update()
-                return False
+        def _trigger_update():
+            for source in [_s.name for _s in self._service.update_config.sources]:
+                self._current_source = source
+                self.set_source_update_time(0)
+            self.trigger_update()
+
+        if os.path.exists(self.blocklist_path):
+            with open(self.blocklist_path) as blocklist_fp:
+                try:
+                    if not json.load(blocklist_fp).keys():
+                        # If there are no tables in the database, trigger an update of all sources
+                        _trigger_update()
+                        return False
+                except json.JSONDecodeError:
+                    # Whatever is at this location is not JSON parseable
+                    _trigger_update()
+                    return False
+        else:
+            _trigger_update()
+            return False
 
         return True
 

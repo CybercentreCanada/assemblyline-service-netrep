@@ -1,9 +1,10 @@
 import csv
+import json
 import math
 import os
 import re
 from collections import defaultdict
-from typing import Set
+from typing import Dict, Set
 from urllib.parse import urlparse
 
 from ail_typo_squatting import runAll
@@ -16,7 +17,6 @@ from assemblyline_v4_service.common.result import (
     ResultTableSection,
     TableRow,
 )
-from tinydb import TinyDB
 
 NETWORK_IOC_TYPES = ["domain", "ip", "uri"]
 
@@ -24,7 +24,7 @@ NETWORK_IOC_TYPES = ["domain", "ip", "uri"]
 class NetRep(ServiceBase):
     def __init__(self, config=None):
         super(NetRep, self).__init__(config)
-        self.blocklist: TinyDB = None
+        self.blocklist: Dict[str, Dict] = None
 
         self.top_1m: Set[str] = set()
         top_1m_file = os.environ.get("TOP_1M_CSV", "top-1m.csv")
@@ -71,13 +71,13 @@ class NetRep(ServiceBase):
 
     def _load_rules(self) -> None:
         if os.path.exists(os.path.join(self.rules_directory, "blocklist.json")):
-            self.blocklist = TinyDB(
-                os.path.join(self.rules_directory, "blocklist.json")
-            )
-            self.blocklist.table_class.document_id_class = str
+            with open(os.path.join(self.rules_directory, "blocklist.json")) as fp:
+                self.blocklist = json.load(fp)
 
-        if self.blocklist.tables():
-            self.log.info(f"Reputation list found for: {self.blocklist.tables()}")
+        if self.blocklist:
+            self.log.info(f"Reputation list found for: {list(self.blocklist.keys())}")
+            for ioc_type in NETWORK_IOC_TYPES:
+                self.blocklist.setdefault(ioc_type, {})
         else:
             self.log.warning(
                 "Reputation list missing. Service will only perform typosquatting detection.."
@@ -116,14 +116,18 @@ class NetRep(ServiceBase):
             "Confirmed Bad", heuristic=Heuristic(1)
         )
 
+        known_bad_domains = set()
         # Check to see if IOCs are known to have a bad reputation
         for ioc_type, ioc_values in iocs.items():
             if not ioc_values:
                 continue
 
             # Determine if any of the IOCs are within the known bad lists
-            for doc in self.blocklist.table(ioc_type).get(doc_ids=ioc_values):
-                ioc_value = doc.doc_id
+            for ioc_value, doc in [
+                (v, self.blocklist[ioc_type][v])
+                for v in ioc_values
+                if self.blocklist[ioc_type].get(v)
+            ]:
                 confirmed_ioc_section.add_row(
                     TableRow(
                         {
@@ -139,18 +143,27 @@ class NetRep(ServiceBase):
                 if ioc_type == "uri":
                     hostname = urlparse(ioc_value).hostname
                     host_type = "ip" if re.match(IP_ONLY_REGEX, hostname) else "domain"
-                    if self.blocklist.table(host_type).get(doc_id=hostname):
+                    if self.blocklist[host_type].get(hostname):
+                        # Add this host to the list of known bad domains to avoid typo squatting checks
+                        known_bad_domains.add(hostname)
                         confirmed_ioc_section.add_tag(
                             f"network.static.{host_type}", hostname
                         )
+                elif ioc_type == "domain":
+                    # Add this domain to the list of known bad domains to avoid typo squatting checks
+                    known_bad_domains.add(ioc_value)
 
         # If there's notable content, append to parent section
         if confirmed_ioc_section.body:
             result.add_section(confirmed_ioc_section)
 
         # Perform typosquatting checks against top 1M (only applicable to domains)
+        self.log.info("Performing typosquat check..")
         typo_table = ResultTableSection("Domain Typosquatting", heuristic=Heuristic(3))
-        for domain in iocs["domain"] + [urlparse(uri).hostname for uri in iocs["uri"]]:
+        for domain in (
+            set(iocs["domain"] + [urlparse(uri).hostname for uri in iocs["uri"]])
+            - known_bad_domains
+        ):
             if not isinstance(domain, str):
                 if domain:
                     self.log.warning(
