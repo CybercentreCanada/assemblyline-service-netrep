@@ -67,7 +67,10 @@ class NetRepUpdateServer(ServiceUpdater):
     def import_update(self, files_sha256, _, source_name, __):
         blocklist = {}
         if os.path.exists(self.blocklist_path):
-            blocklist = json.load(open(self.blocklist_path))
+            try:
+                blocklist = json.load(open(self.blocklist_path))
+            except Exception:
+                pass
 
         def get_malware_families(data: str, validate=True) -> List[str]:
             if not data:

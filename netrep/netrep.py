@@ -76,9 +76,8 @@ class NetRep(ServiceBase):
             )
             self.blocklist.table_class.document_id_class = str
 
-        if self.blocklist:
-            self.log.debug(len(self.blocklist))
-            self.log.info("Reputation list found.")
+        if self.blocklist.tables():
+            self.log.info(f"Reputation list found for: {self.blocklist.tables()}")
         else:
             self.log.warning(
                 "Reputation list missing. Service will only perform typosquatting detection.."
