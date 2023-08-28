@@ -139,6 +139,7 @@ class NetRep(ServiceBase):
                     )
                 )
                 confirmed_ioc_section.add_tag(f"network.static.{ioc_type}", ioc_value)
+                [confirmed_ioc_section.add_tag("attribution.family", f) for f in doc["malware_family"]]
                 # If IOC type is a URI, extract the domain/IP and tag it as well if found in blocklist
                 if ioc_type == "uri":
                     hostname = urlparse(ioc_value).hostname
