@@ -79,7 +79,7 @@ config:
       format: list
 
 docker_config:
-  image: ${PRIVATE_REGISTRY}cccs/assemblyline-service-netrep:$SERVICE_TAG
+  image: ${REGISTRY}cccs/assemblyline-service-netrep:$SERVICE_TAG
   cpu_cores: 1
   ram_mb: 2048
   allow_internet_access: true
@@ -89,7 +89,7 @@ dependencies:
     container:
       allow_internet_access: true
       command: ["python", "-m", "netrep.update_server"]
-      image: ${PRIVATE_REGISTRY}cccs/assemblyline-service-netrep:$SERVICE_TAG
+      image: ${REGISTRY}cccs/assemblyline-service-netrep:$SERVICE_TAG
       ports: ["5003"]
       ram_mb: 4096
     run_as_core: True
