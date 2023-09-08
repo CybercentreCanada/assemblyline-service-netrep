@@ -162,6 +162,10 @@ class NetRep(ServiceBase):
                     )
                     typo_table.add_tag("network.static.domain", domain)
 
+            if typo_table.body:
+                result.add_section(typo_table)
+
+
         # Phishing techniques
         phishing_table = ResultTableSection("Suspected Phishing URIs", heuristic=Heuristic(4))
         for uri in iocs["uri"]:
@@ -170,9 +174,6 @@ class NetRep(ServiceBase):
             if parsed_url.username or parsed_url.password:
                 phishing_table.add_row(TableRow({"URI": uri, "Reason": "Basic authentication included in URI"}))
                 phishing_table.add_tag("network.static.uri", uri)
-
-        if typo_table.body:
-            result.add_section(typo_table)
 
         if phishing_table.body:
             result.add_section(phishing_table)
