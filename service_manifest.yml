@@ -45,8 +45,8 @@ heuristics:
 
 submission_params:
   - name: enable_typosquatting_check
-    value: false
-    default: false
+    value: true
+    default: true
     type: bool
 
 config:
