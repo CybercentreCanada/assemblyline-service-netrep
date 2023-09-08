@@ -112,7 +112,7 @@ class NetRepUpdateServer(ServiceUpdater):
             if ioc_type == "uri":
                 # Is this IOC definitely malicious or questionable?
                 # (ie. drive.google.com is in the top 1M but can be used for malicious purposes)
-                hostname = urlparse(ioc_value).hostname
+                hostname: str = urlparse(ioc_value).hostname
                 for host_ioc_type, check in IOC_CHECK.items():
                     if check(hostname):
                         blocklist.setdefault(host_ioc_type, {})
@@ -123,7 +123,7 @@ class NetRepUpdateServer(ServiceUpdater):
                             # Check to see if the host is a subdomain of one of the top 1M, if so don't block
                             # ie. s3.amazon.com isn't part of the top 1M but it is a subdomain of amazon.com which is
                             if host_ioc_type == "domain" and any(
-                                hostname.endwith(f".{domain}") for domain in self.top_1m
+                                hostname.endswith(f".{domain}") for domain in self.top_1m
                             ):
                                 pass
                             # Check to see if the host is known in the top 1M
