@@ -32,13 +32,9 @@ class NetRepUpdateServer(ServiceUpdater):
         self.top_1m: Set[str] = set()
         top_1m_file = os.environ.get("TOP_1M_CSV", "top-1m.csv")
         if os.path.exists(top_1m_file):
-            self.top_1m = set(
-                line[1] for line in csv.reader(open(top_1m_file), delimiter=",")
-            )
+            self.top_1m = set(line[1] for line in csv.reader(open(top_1m_file), delimiter=","))
 
-        self.malware_families_path: str = os.path.join(
-            self.latest_updates_dir, "malware_families.json"
-        )
+        self.malware_families_path: str = os.path.join(self.latest_updates_dir, "malware_families.json")
         self.blocklist_path = os.path.join(self.latest_updates_dir, "blocklist.json")
         self.malware_families: Set[str] = set()
 
@@ -46,9 +42,7 @@ class NetRepUpdateServer(ServiceUpdater):
             with open(self.malware_families_path, "r") as fp:
                 self.malware_families = set(json.load(fp))
 
-        self.log.info(
-            f"{len(self.malware_families)} malware families loaded at startup"
-        )
+        self.log.info(f"{len(self.malware_families)} malware families loaded at startup")
 
     # A sanity check to make sure we do in fact have things to send to services
     def _inventory_check(self) -> bool:
@@ -88,9 +82,7 @@ class NetRepUpdateServer(ServiceUpdater):
                 return []
 
             # Normalize data (parsing based off Malpedia API output)
-            malware_family = (
-                data.replace("-", "").replace("_", "").replace("#", "").lower()
-            )
+            malware_family = data.replace("-", "").replace("_", "").replace("#", "").lower()
             if "," in malware_family:
                 malware_family = malware_family.split(",")
             else:
@@ -108,9 +100,7 @@ class NetRepUpdateServer(ServiceUpdater):
             doc = blocklist[ioc_type].get(ioc_value)
             if doc:
                 # Document already exists, therefore update
-                doc["malware_family"] = list(
-                    set(doc["malware_family"] + malware_family)
-                )
+                doc["malware_family"] = list(set(doc["malware_family"] + malware_family))
                 doc["source"] = list(set(doc["source"] + [source_name]))
             else:
                 # Document has yet to exist, therefore create
@@ -174,15 +164,11 @@ class NetRepUpdateServer(ServiceUpdater):
                         blocklist_data = json.load(fp)
                         if isinstance(blocklist_data, list):
                             for data in blocklist_data:
-                                malware_family = get_malware_families(
-                                    data.get(source_cfg.get("malware_family"))
-                                )
+                                malware_family = get_malware_families(data.get(source_cfg.get("malware_family")))
                                 for ioc_type in IOC_TYPES:
                                     ioc_value = data.get(source_cfg.get(ioc_type))
                                     if ioc_value:
-                                        update_blocklist(
-                                            ioc_type, ioc_value, malware_family
-                                        )
+                                        update_blocklist(ioc_type, ioc_value, malware_family)
             # Commit list to disk
             with open(self.blocklist_path, "w") as fp:
                 fp.write(json.dumps(blocklist))

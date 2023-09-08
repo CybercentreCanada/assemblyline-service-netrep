@@ -43,6 +43,12 @@ heuristics:
     filetype: .*
     description: This IOC seems to be phishing-related
 
+submission_params:
+  - name: enable_typosquatting_check
+    value: true
+    default: true
+    type: bool
+
 config:
   updater:
     phishunt:
