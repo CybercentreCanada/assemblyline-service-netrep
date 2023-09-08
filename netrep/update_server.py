@@ -120,8 +120,14 @@ class NetRepUpdateServer(ServiceUpdater):
                             # Host is already known to be bad on another list
                             pass
                         else:
+                            # Check to see if the host is a subdomain of one of the top 1M, if so don't block
+                            # ie. s3.amazon.com isn't part of the top 1M but it is a subdomain of amazon.com which is
+                            if host_ioc_type == "domain" and any(
+                                hostname.endwith(f".{domain}") for domain in self.top_1m
+                            ):
+                                pass
                             # Check to see if the host is known in the top 1M
-                            if hostname not in self.top_1m:
+                            elif hostname not in self.top_1m:
                                 # If this isn't in the top 1M, assume the domain is outright malicious
                                 # So properties of this maliciousness will be transferred
                                 update_blocklist(

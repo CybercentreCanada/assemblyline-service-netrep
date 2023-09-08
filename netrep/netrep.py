@@ -165,7 +165,6 @@ class NetRep(ServiceBase):
             if typo_table.body:
                 result.add_section(typo_table)
 
-
         # Phishing techniques
         phishing_table = ResultTableSection("Suspected Phishing URIs", heuristic=Heuristic(4))
         for uri in iocs["uri"]:
