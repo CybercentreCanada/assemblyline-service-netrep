@@ -139,7 +139,10 @@ class NetRep(ServiceBase):
                     )
                 )
                 confirmed_ioc_section.add_tag(f"network.static.{ioc_type}", ioc_value)
-                [confirmed_ioc_section.add_tag("attribution.family", f) for f in doc["malware_family"]]
+                [
+                    confirmed_ioc_section.add_tag("attribution.family", f)
+                    for f in doc["malware_family"]
+                ]
                 # If IOC type is a URI, extract the domain/IP and tag it as well if found in blocklist
                 if ioc_type == "uri":
                     hostname = urlparse(ioc_value).hostname
@@ -158,42 +161,45 @@ class NetRep(ServiceBase):
         if confirmed_ioc_section.body:
             result.add_section(confirmed_ioc_section)
 
-        # Perform typosquatting checks against top 1M (only applicable to domains)
-        self.log.info("Performing typosquat check..")
-        typo_table = ResultTableSection("Domain Typosquatting", heuristic=Heuristic(3))
-        for domain in (
-            set(iocs["domain"] + [urlparse(uri).hostname for uri in iocs["uri"]])
-            - known_bad_domains
-        ):
-            if not isinstance(domain, str):
-                if domain:
-                    self.log.warning(
-                        f"Non-string {domain} found when performing typosquatting check"
-                    )
-                # Skip if given domain isn't a string
-                continue
-            elif re.match(IP_ONLY_REGEX, domain):
-                # Can't perform typosquatting checks on IPs
-                continue
-            elif domain in self.top_1m:
-                # Make sure domain doesn't exist in the top 1M
-                continue
+        if request.get_param("enable_typosquatting_check"):
+            # Perform typosquatting checks against top 1M (only applicable to domains)
+            self.log.info("Performing typosquat check..")
+            typo_table = ResultTableSection(
+                "Domain Typosquatting", heuristic=Heuristic(3)
+            )
+            for domain in (
+                set(iocs["domain"] + [urlparse(uri).hostname for uri in iocs["uri"]])
+                - known_bad_domains
+            ):
+                if not isinstance(domain, str):
+                    if domain:
+                        self.log.warning(
+                            f"Non-string {domain} found when performing typosquatting check"
+                        )
+                    # Skip if given domain isn't a string
+                    continue
+                elif re.match(IP_ONLY_REGEX, domain):
+                    # Can't perform typosquatting checks on IPs
+                    continue
+                elif domain in self.top_1m:
+                    # Make sure domain doesn't exist in the top 1M
+                    continue
 
-            # Generate variations of the domain and see if a variant is a legitimate domain
-            legitimate_domains = set(
-                runAll(domain, math.inf, "text", None)
-            ).intersection(self.top_1m)
-            if legitimate_domains:
-                # Add to table
-                typo_table.add_row(
-                    TableRow(
-                        {
-                            "TYPOSQUATTED DOMAIN": domain,
-                            "TOP 1M DOMAIN COLLISION": list(legitimate_domains),
-                        }
+                # Generate variations of the domain and see if a variant is a legitimate domain
+                legitimate_domains = set(
+                    runAll(domain, math.inf, "text", None)
+                ).intersection(self.top_1m)
+                if legitimate_domains:
+                    # Add to table
+                    typo_table.add_row(
+                        TableRow(
+                            {
+                                "TYPOSQUATTED DOMAIN": domain,
+                                "TOP 1M DOMAIN COLLISION": list(legitimate_domains),
+                            }
+                        )
                     )
-                )
-                typo_table.add_tag("network.static.domain", domain)
+                    typo_table.add_tag("network.static.domain", domain)
 
         # Phishing techniques
         phishing_table = ResultTableSection(
