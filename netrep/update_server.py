@@ -127,7 +127,7 @@ class NetRepUpdateServer(ServiceUpdater):
                 # Document already exists, therefore update
                 doc["malware_family"] = list(set(doc["malware_family"] + malware_family))
                 doc["source"] = list(set(doc["source"] + [source_name]))
-                doc["references"] = list(set(doc["references"] + references))
+                doc["references"] = list(set(doc.get("references", []) + references))
             else:
                 # Document has yet to exist, therefore create
                 doc = dict(malware_family=malware_family, source=[source_name], references=references)
