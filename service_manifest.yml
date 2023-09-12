@@ -60,6 +60,7 @@ config:
       format: csv
       uri: 2
       malware_family: 6
+      reference: 7
       start: 9
     blackbook:
       type: blocklist
@@ -70,10 +71,12 @@ config:
     tweetfeed:
       type: blocklist
       format: csv
+      ignore_terms: ["SGEmail2"] # Ignore IOCs reported by Twitter/X user(s)
       ip: 3
       uri: 3
       domain: 3
       malware_family: 4
+      reference: 5
     feodotracker:
       type: blocklist
       format: json
@@ -112,9 +115,11 @@ update_config:
     - name: urlhaus
       uri: https://urlhaus.abuse.ch/downloads/csv
       pattern: .*\/csv\.txt$
+    # Use fork that will contain corrections for FPs raised until merged with source
     - name: tweetfeed
-      uri: https://github.com/0xDanielLopez/TweetFeed.git
+      uri: https://github.com/cccs-rs/TweetFeed.git
       pattern: .*\.csv$
+      sync: true
     - name: blackbook
       uri: https://github.com/stamparm/blackbook.git
       pattern: .*\.csv$
