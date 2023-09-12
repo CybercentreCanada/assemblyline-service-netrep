@@ -115,10 +115,11 @@ update_config:
     - name: urlhaus
       uri: https://urlhaus.abuse.ch/downloads/csv
       pattern: .*\/csv\.txt$
+    # Use fork that will contain corrections for FPs raised until merged with source
     - name: tweetfeed
-      # Use fork that will contain corrections for FPs raised until merged with source
       uri: https://github.com/cccs-rs/TweetFeed.git
       pattern: .*\.csv$
+      sync: true
     - name: blackbook
       uri: https://github.com/stamparm/blackbook.git
       pattern: .*\.csv$
