@@ -156,7 +156,7 @@ class NetRepUpdateServer(ServiceUpdater):
                                     host_ioc_type,
                                     hostname,
                                     doc["malware_family"],
-                                    references=references + [f"Domain extracted from known bad URI: {ioc_value}"],
+                                    references=references,
                                 )
                         break
 
