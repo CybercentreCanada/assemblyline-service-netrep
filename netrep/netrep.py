@@ -115,7 +115,7 @@ class NetRep(ServiceBase):
                             "IOC": ioc_value,
                             "TYPE": ioc_type.upper(),
                             "MALWARE_FAMILY": doc["malware_family"],
-                            "REFERENCES": doc.get("references", []),
+                            "REFERENCES": "\n".join(doc.get("references", [])),
                         }
                     )
                 )
