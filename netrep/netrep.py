@@ -21,10 +21,10 @@ class NetRep(ServiceBase):
         super(NetRep, self).__init__(config)
         self.blocklist: Dict[str, Dict] = None
 
-        self.top_1m: Set[str] = set()
-        top_1m_file = os.environ.get("TOP_1M_CSV", "top-1m.csv")
-        if os.path.exists(top_1m_file):
-            self.top_1m = set(line[1] for line in csv.reader(open(top_1m_file), delimiter=","))
+        self.top_domain: Set[str] = set()
+        top_domain_file = os.environ.get("TOP_DOMAIN_CSV", "cloudflare-radar-domains-top-2000")
+        if os.path.exists(top_domain_file):
+            self.top_domain = set(line[0] for line in csv.reader(open(top_domain_file), delimiter=","))
 
         self.safelist_interface = self.get_api_interface().get_safelist
         self.safelist_regex = None
@@ -80,6 +80,11 @@ class NetRep(ServiceBase):
                 for x in v
             ]
 
+        # Check to see if any of the domains tagged are email domains
+        # If so, this service isn't qualified to determine the maliciousness of email domains therefore remove from set
+        email_domains = {email.split("@", 1)[-1] for email in request.task.tags.get("network.email.address", [])}
+        iocs["domain"] = list(set(iocs["domain"]) - email_domains)
+
         # Pre-filter network IOCs based on AL safelist
         if self.safelist_regex or self.safelist_match:
 
@@ -110,6 +115,7 @@ class NetRep(ServiceBase):
                             "IOC": ioc_value,
                             "TYPE": ioc_type.upper(),
                             "MALWARE_FAMILY": doc["malware_family"],
+                            "REFERENCES": doc["references"],
                         }
                     )
                 )
@@ -144,12 +150,12 @@ class NetRep(ServiceBase):
                 elif re.match(IP_ONLY_REGEX, domain):
                     # Can't perform typosquatting checks on IPs
                     continue
-                elif domain in self.top_1m:
+                elif domain in self.top_domain:
                     # Make sure domain doesn't exist in the top 1M
                     continue
 
                 # Generate variations of the domain and see if a variant is a legitimate domain
-                legitimate_domains = set(runAll(domain, math.inf, "text", None)).intersection(self.top_1m)
+                legitimate_domains = set(runAll(domain, math.inf, "text", None)).intersection(self.top_domain)
                 if legitimate_domains:
                     # Add to table
                     typo_table.add_row(
