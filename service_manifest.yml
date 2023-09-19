@@ -83,8 +83,11 @@ config:
       ip: ip_address
       domain: hostname
       malware_family: malware
-    malpedia:
+    malpedia_malware_family:
       type: malware_family_list
+      format: list
+    malpedia_attribution:
+      type: attribution_list
       format: list
 
 docker_config:
@@ -106,9 +109,12 @@ dependencies:
 update_config:
   generates_signatures: false
   sources:
-    - name: malpedia
+    - name: malpedia_malware_family
       uri: https://malpedia.caad.fkie.fraunhofer.de/api/list/families?format=json
       pattern: .*\/families
+    - name: malpedia_attribution
+      uri: https://malpedia.caad.fkie.fraunhofer.de/api/list/actors?format=json
+      pattern: .*\/actors
     - name: phishunt
       uri: https://phishunt.io/feed.txt
       pattern: .*\/feed\.txt
