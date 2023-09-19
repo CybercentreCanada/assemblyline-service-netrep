@@ -115,12 +115,14 @@ class NetRep(ServiceBase):
                             "IOC": ioc_value,
                             "TYPE": ioc_type.upper(),
                             "MALWARE_FAMILY": doc["malware_family"],
+                            "ATTRIBUTION": doc.get("attribution", []),
                             "REFERENCES": "\n".join(doc.get("references", [])),
                         }
                     )
                 )
                 confirmed_ioc_section.add_tag(f"network.static.{ioc_type}", ioc_value)
                 [confirmed_ioc_section.add_tag("attribution.family", f) for f in doc["malware_family"]]
+                [confirmed_ioc_section.add_tag("attribution.actor", f) for f in doc.get("attribution", [])]
                 # If IOC type is a URI, extract the domain/IP and tag it as well if found in blocklist
                 if ioc_type == "uri":
                     hostname = urlparse(ioc_value).hostname
