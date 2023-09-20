@@ -83,7 +83,7 @@ config:
       ip: ip_address
       domain: hostname
       malware_family: malware
-    malpedia_malware_family:
+    malpedia:
       type: malware_family_list
       format: list
     malpedia_attribution:
@@ -109,7 +109,7 @@ dependencies:
 update_config:
   generates_signatures: false
   sources:
-    - name: malpedia_malware_family
+    - name: malpedia
       uri: https://malpedia.caad.fkie.fraunhofer.de/api/list/families?format=json
       pattern: .*\/families
     - name: malpedia_attribution
