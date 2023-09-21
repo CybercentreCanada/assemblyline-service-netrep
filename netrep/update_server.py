@@ -100,26 +100,12 @@ class NetRepUpdateServer(ServiceUpdater):
     def import_update(self, files_sha256, al_client, source_name, _):
         blocklist = {}
         blocklist_path = os.path.join(self.latest_updates_dir, source_name)
-        if os.path.exists(blocklist_path):
+        # If syncing is disabled and source blocklist exists, contribute to existing blocklist
+        if os.path.exists(blocklist_path) and not al_client.signature.sync:
             try:
                 blocklist = json.load(open(blocklist_path))
             except Exception:
                 pass
-
-        if al_client.signature.sync:
-            # If syncing is enabled, prune all records affiliated with source from blocklist
-            tmp_blocklist = dict()
-            for ioc_type, ioc_map in blocklist.items():
-                tmp_blocklist[ioc_type] = {}
-                for ioc_value, properties in ioc_map.items():
-                    if source_name in properties["source"]:
-                        # Remove source from list of sources that repute this IOC is malicious
-                        properties["source"].remove(source_name)
-
-                    if properties["source"]:
-                        # Other sources still state this IOC is malicious
-                        tmp_blocklist[ioc_type][ioc_value] = properties
-            blocklist = tmp_blocklist
 
         def sanitize_data(data: str, type: str, validate=True) -> List[str]:
             if not data:
