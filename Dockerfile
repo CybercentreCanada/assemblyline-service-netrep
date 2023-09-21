@@ -16,8 +16,8 @@ WORKDIR /opt/al_service
 COPY . .
 
 USER root
-RUN mv cloudflare-radar-domains-top-2000.csv /etc/top-2000.csv
-ENV TOP_DOMAIN_CSV /etc/top-2000.csv
+RUN mv cloudflare-radar-domains-top-50000.csv /etc/top-domain.csv
+ENV TOP_DOMAIN_CSV /etc/top-domain.csv
 
 USER assemblyline
 
