@@ -11,7 +11,7 @@ from ail_typo_squatting import runAll
 from assemblyline.odm.base import IP_ONLY_REGEX
 from assemblyline_v4_service.common.api import ServiceAPIError
 from assemblyline_v4_service.common.base import ServiceBase
-from assemblyline_v4_service.common.result import Heuristic, Result, ResultTableSection, TableRow
+from assemblyline_v4_service.common.result import Heuristic, Result, ResultSection, ResultTableSection, TableRow
 
 NETWORK_IOC_TYPES = ["domain", "ip", "uri"]
 
@@ -19,7 +19,7 @@ NETWORK_IOC_TYPES = ["domain", "ip", "uri"]
 class NetRep(ServiceBase):
     def __init__(self, config=None):
         super(NetRep, self).__init__(config)
-        self.blocklist: Dict[str, Dict] = None
+        self.blocklists: Dict[str, Dict] = None
 
         self.top_domain: Set[str] = set()
         top_domain_file = os.environ.get("TOP_DOMAIN_CSV", "cloudflare-radar-domains-top-2000")
@@ -55,14 +55,17 @@ class NetRep(ServiceBase):
             self.log.warning(f"Couldn't retrieve safelist from service server: {e}. Continuing without it..")
 
     def _load_rules(self) -> None:
-        if os.path.exists(os.path.join(self.rules_directory, "blocklist.json")):
-            with open(os.path.join(self.rules_directory, "blocklist.json")) as fp:
-                self.blocklist = json.load(fp)
+        self.blocklists = {}
+        for blocklist_name in os.listdir(self.rules_directory):
+            if blocklist_name not in list(self.config["updater"].keys()):
+                continue
+            with open(os.path.join(self.rules_directory, blocklist_name)) as fp:
+                self.blocklists[blocklist_name] = json.load(fp)
+                for ioc_type in NETWORK_IOC_TYPES:
+                    self.blocklists[blocklist_name].setdefault(ioc_type, {})
 
-        if self.blocklist:
-            self.log.info(f"Reputation list found for: {list(self.blocklist.keys())}")
-            for ioc_type in NETWORK_IOC_TYPES:
-                self.blocklist.setdefault(ioc_type, {})
+        if self.blocklists:
+            self.log.info(f"Reputation list found for sources: {list(self.blocklists.keys())}")
         else:
             self.log.warning("Reputation list missing. Service will only perform typosquatting detection..")
 
@@ -96,47 +99,55 @@ class NetRep(ServiceBase):
 
             [filter_items(iocs[net_ioc_type]) for net_ioc_type in NETWORK_IOC_TYPES]
 
-        confirmed_ioc_section = ResultTableSection("Confirmed Bad", heuristic=Heuristic(1))
+        confirmed_ioc_section = ResultSection("Confirmed Bad")
 
         known_bad_domains = set()
-        # Check to see if IOCs are known to have a bad reputation
-        for ioc_type, ioc_values in iocs.items():
-            if not ioc_values:
-                continue
+        for source, blocklist in self.blocklists.items():
+            section = ResultTableSection(
+                f"Blocklist Source: {source}",
+                heuristic=Heuristic(1),
+                classification=self.signatures_meta[source]["classification"],
+            )
 
-            # Determine if any of the IOCs are within the known bad lists
-            for ioc_value, doc in [
-                (v, self.blocklist[ioc_type][v]) for v in ioc_values if self.blocklist[ioc_type].get(v)
-            ]:
-                confirmed_ioc_section.add_row(
-                    TableRow(
-                        {
-                            "BLOCKLIST SOURCE(S)": doc["source"],
-                            "IOC": ioc_value,
-                            "TYPE": ioc_type.upper(),
-                            "MALWARE_FAMILY": doc["malware_family"],
-                            "ATTRIBUTION": doc.get("attribution", []),
-                            "REFERENCES": "\n".join(doc.get("references", [])),
-                        }
-                    )
-                )
-                confirmed_ioc_section.add_tag(f"network.static.{ioc_type}", ioc_value)
-                [confirmed_ioc_section.add_tag("attribution.family", f) for f in doc["malware_family"]]
-                [confirmed_ioc_section.add_tag("attribution.actor", f) for f in doc.get("attribution", [])]
-                # If IOC type is a URI, extract the domain/IP and tag it as well if found in blocklist
-                if ioc_type == "uri":
-                    hostname = urlparse(ioc_value).hostname
-                    host_type = "ip" if re.match(IP_ONLY_REGEX, hostname) else "domain"
-                    if self.blocklist[host_type].get(hostname):
-                        # Add this host to the list of known bad domains to avoid typo squatting checks
-                        known_bad_domains.add(hostname)
-                        confirmed_ioc_section.add_tag(f"network.static.{host_type}", hostname)
-                elif ioc_type == "domain":
-                    # Add this domain to the list of known bad domains to avoid typo squatting checks
-                    known_bad_domains.add(ioc_value)
+            # Check to see if IOCs are known to have a bad reputation
+            for ioc_type, ioc_values in iocs.items():
+                if not ioc_values:
+                    continue
+
+                # Determine if any of the IOCs are within the known bad lists
+                for ioc_value, doc in [(v, blocklist[ioc_type][v]) for v in ioc_values if blocklist[ioc_type].get(v)]:
+                    # Add columns selectively only if they have information
+                    row_data = {
+                        "IOC": ioc_value,
+                    }
+
+                    for extra_info in ["malware_family", "attribution", "references"]:
+                        if doc.get(extra_info):
+                            row_data[extra_info.upper()] = doc[extra_info]
+
+                    section.add_row(TableRow(row_data))
+
+                    section.add_tag(f"network.static.{ioc_type}", ioc_value)
+                    [section.add_tag("attribution.family", f) for f in doc["malware_family"]]
+                    [section.add_tag("attribution.actor", f) for f in doc.get("attribution", [])]
+                    # If IOC type is a URI, extract the domain/IP and tag it as well if found in blocklist
+                    if ioc_type == "uri":
+                        hostname = urlparse(ioc_value).hostname
+                        host_type = "ip" if re.match(IP_ONLY_REGEX, hostname) else "domain"
+                        if self.blocklist[host_type].get(hostname):
+                            # Add this host to the list of known bad domains to avoid typo squatting checks
+                            known_bad_domains.add(hostname)
+                            section.add_tag(f"network.static.{host_type}", hostname)
+                    elif ioc_type == "domain":
+                        # Add this domain to the list of known bad domains to avoid typo squatting checks
+                        known_bad_domains.add(ioc_value)
+
+            if section.body:
+                section.section_body._data = sorted(section.section_body._data, key=lambda x: x["IOC"])
+                confirmed_ioc_section.add_subsection(section)
 
         # If there's notable content, append to parent section
-        if confirmed_ioc_section.body:
+        if confirmed_ioc_section.subsections:
             result.add_section(confirmed_ioc_section)
 
         if request.get_param("enable_typosquatting_check"):

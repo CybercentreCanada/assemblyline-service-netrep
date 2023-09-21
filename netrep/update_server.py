@@ -2,6 +2,8 @@ import csv
 import json
 import os
 import re
+import shutil
+import tempfile
 from typing import List, Set
 from urllib.parse import urlparse
 
@@ -36,7 +38,6 @@ class NetRepUpdateServer(ServiceUpdater):
 
         self.attributions_path: str = os.path.join(self.latest_updates_dir, "attribution.json")
         self.malware_families_path: str = os.path.join(self.latest_updates_dir, "malware_families.json")
-        self.blocklist_path = os.path.join(self.latest_updates_dir, "blocklist.json")
 
         self.malware_families: Set[str] = set()
         self.attributions: Set[str] = set()
@@ -61,37 +62,47 @@ class NetRepUpdateServer(ServiceUpdater):
             self.set_source_update_time(0)
             self.trigger_update()
 
-        if os.path.exists(self.blocklist_path):
-            with open(self.blocklist_path, "r") as blocklist_fp:
-                blocklist_contents = blocklist_fp.read()
-                found_sources = []
-                for source in [
-                    _s.name
-                    for _s in self._service.update_config.sources
-                    if self._service.config["updater"][_s.name]["type"] == "blocklist"
-                ]:
-                    if source not in blocklist_contents:
-                        # If we can't find the source name in the blocklist, trigger an update
-                        _trigger_update(source)
-                        success = False
-                    else:
-                        found_sources.append(source)
+        if not os.path.exists(self.attributions_path):
+            # Trigger an update for any sources that contribute to attributions list
+            [
+                _trigger_update(_s.name)
+                for _s in self._service.update_config.sources
+                if self._service.config["updater"][_s.name]["type"] == "attribution_list"
+            ]
 
-                if found_sources:
-                    # We have at least one blocklist source to work with for the time being
-                    success = True
-        else:
-            for source in [_s.name for _s in self._service.update_config.sources]:
+        if not os.path.exists(self.malware_families_path):
+            # Trigger an update for any sources that contribute to the malware families list
+            [
+                _trigger_update(_s.name)
+                for _s in self._service.update_config.sources
+                if self._service.config["updater"][_s.name]["type"] == "malware_family_list"
+            ]
+
+        found_blocklist = False
+        for source in [
+            _s.name
+            for _s in self._service.update_config.sources
+            if self._service.config["updater"][_s.name]["type"] == "blocklist"
+        ]:
+            if source not in os.listdir(self._update_dir):
+                # If we can't find the source name in the blocklist, trigger an update
                 _trigger_update(source)
-            success = False
+                success = False
+            else:
+                found_blocklist = True
+
+        if found_blocklist:
+            # We have at least one blocklist source to work with for the time being
+            success = True
 
         return success
 
     def import_update(self, files_sha256, al_client, source_name, _):
         blocklist = {}
-        if os.path.exists(self.blocklist_path):
+        blocklist_path = os.path.join(self.latest_updates_dir, source_name)
+        if os.path.exists(blocklist_path):
             try:
-                blocklist = json.load(open(self.blocklist_path))
+                blocklist = json.load(open(blocklist_path))
             except Exception:
                 pass
 
@@ -136,14 +147,11 @@ class NetRepUpdateServer(ServiceUpdater):
             if doc:
                 # Document already exists, therefore update
                 doc["malware_family"] = list(set(doc["malware_family"] + malware_family))
-                doc["source"] = list(set(doc["source"] + [source_name]))
                 doc["references"] = list(set(doc.get("references", []) + references))
                 doc["attribution"] = list(set(doc.get("attribution", []) + attribution))
             else:
                 # Document has yet to exist, therefore create
-                doc = dict(
-                    malware_family=malware_family, source=[source_name], references=references, attribution=attribution
-                )
+                doc = dict(malware_family=malware_family, references=references, attribution=attribution)
             blocklist[ioc_type][ioc_value] = doc
             if ioc_type == "uri":
                 # Is this IOC definitely malicious or questionable?
@@ -241,7 +249,7 @@ class NetRepUpdateServer(ServiceUpdater):
                                     if ioc_value:
                                         update_blocklist(ioc_type, ioc_value, malware_family, attribution, references)
             # Commit list to disk
-            with open(self.blocklist_path, "w") as fp:
+            with open(blocklist_path, "w") as fp:
                 fp.write(json.dumps(blocklist))
 
         elif source_cfg["type"] == "malware_family_list":
@@ -255,7 +263,7 @@ class NetRepUpdateServer(ServiceUpdater):
                             self.malware_families = self.malware_families.union(
                                 set(
                                     sanitize_data(
-                                        malware_family.split(".", 1)[1],
+                                        malware_family.split(".", 1)[-1],
                                         type="malware_family",
                                         validate=False,
                                     )
@@ -282,6 +290,19 @@ class NetRepUpdateServer(ServiceUpdater):
             # Commit list to disk
             with open(self.malware_families_path, "w") as fp:
                 fp.write(json.dumps(self.malware_families, cls=SetEncoder))
+
+    # Define how to prepare the output directory before being served, must return the path of the directory to serve.
+    def prepare_output_directory(self) -> str:
+        output_directory = tempfile.mkdtemp()
+        # Ignore the files that contribute to blocklist construction that the service doesn't need to have
+        shutil.copytree(
+            self.latest_updates_dir,
+            output_directory,
+            dirs_exist_ok=True,
+            ignore=lambda _, y: [i for i in y if i.endswith(".json")],
+        )
+
+        return output_directory
 
 
 if __name__ == "__main__":
