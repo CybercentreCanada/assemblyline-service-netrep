@@ -255,7 +255,7 @@ class NetRepUpdateServer(ServiceUpdater):
                             self.malware_families = self.malware_families.union(
                                 set(
                                     sanitize_data(
-                                        malware_family.split(".", 1)[1],
+                                        malware_family.split(".", 1)[-1],
                                         type="malware_family",
                                         validate=False,
                                     )
