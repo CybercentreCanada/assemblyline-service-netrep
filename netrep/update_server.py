@@ -78,22 +78,21 @@ class NetRepUpdateServer(ServiceUpdater):
                 if self._service.config["updater"][_s.name]["type"] == "malware_family_list"
             ]
 
-        found_blocklist = False
-        for source in [
-            _s.name
-            for _s in self._service.update_config.sources
-            if self._service.config["updater"][_s.name]["type"] == "blocklist"
-        ]:
-            if source not in os.listdir(self._update_dir):
-                # If we can't find the source name in the blocklist, trigger an update
-                _trigger_update(source)
-                success = False
-            else:
-                found_blocklist = True
+        blocklist_sources = set(
+            [
+                _s.name
+                for _s in self._service.update_config.sources
+                if self._service.config["updater"][_s.name]["type"] == "blocklist"
+            ]
+        )
+        missing_blocklists = blocklist_sources - set(os.listdir(self._update_dir))
 
-        if found_blocklist:
+        if missing_blocklists != blocklist_sources:
             # We have at least one blocklist source to work with for the time being
             success = True
+
+        # Trigger an update for the blocklists that are missing
+        [_trigger_update(source) for source in missing_blocklists]
 
         return success
 
@@ -127,6 +126,9 @@ class NetRepUpdateServer(ServiceUpdater):
             ioc_type: str, ioc_value: str, malware_family: List[str], attribution: List[str], references: List[str]
         ):
             blocklist.setdefault(ioc_type, {})
+
+            # Normalize IOC values for when performing lookups
+            ioc_value = ioc_value.lower()
 
             # Check if we've seen this IOC before
             doc = blocklist[ioc_type].get(ioc_value)

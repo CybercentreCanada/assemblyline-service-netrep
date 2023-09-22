@@ -115,7 +115,9 @@ class NetRep(ServiceBase):
                     continue
 
                 # Determine if any of the IOCs are within the known bad lists
-                for ioc_value, doc in [(v, blocklist[ioc_type][v]) for v in ioc_values if blocklist[ioc_type].get(v)]:
+                for ioc_value, doc in [
+                    (v, blocklist[ioc_type][v.lower()]) for v in ioc_values if blocklist[ioc_type].get(v.lower())
+                ]:
                     # Add columns selectively only if they have information
                     row_data = {
                         "IOC": ioc_value,
@@ -134,7 +136,7 @@ class NetRep(ServiceBase):
                     if ioc_type == "uri":
                         hostname = urlparse(ioc_value).hostname
                         host_type = "ip" if re.match(IP_ONLY_REGEX, hostname) else "domain"
-                        if self.blocklist[host_type].get(hostname):
+                        if any(b[host_type].get(hostname) for b in self.blocklists.values()):
                             # Add this host to the list of known bad domains to avoid typo squatting checks
                             known_bad_domains.add(hostname)
                             section.add_tag(f"network.static.{host_type}", hostname)
