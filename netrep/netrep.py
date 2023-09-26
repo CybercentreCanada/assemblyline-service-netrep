@@ -93,7 +93,11 @@ class NetRep(ServiceBase):
         # (commonly tagged by OLETools but causes phishing heuristic to be raised because of '@')
         def filter_out_http_emails(x):
             parsed_url = urlparse(x)
-            if parsed_url.scheme.startswith("http") and parsed_url.netloc in email_addresses and parsed_url.path == "/":
+            if (
+                parsed_url.scheme.startswith("http")
+                and parsed_url.netloc in email_addresses
+                and (parsed_url.path == "/" or not parsed_url.path)
+            ):
                 return False
             return True
 
