@@ -101,7 +101,7 @@ class NetRep(ServiceBase):
                 return False
             return True
 
-        iocs["uri"] = filter(filter_out_http_emails, iocs["uri"])
+        iocs["uri"] = list(filter(filter_out_http_emails, iocs["uri"]))
 
         # Pre-filter network IOCs based on AL safelist
         if self.safelist_regex or self.safelist_match:
