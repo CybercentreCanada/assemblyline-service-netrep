@@ -85,14 +85,14 @@ class NetRep(ServiceBase):
 
         # Check to see if any of the domains tagged are email domains
         # If so, this service isn't qualified to determine the maliciousness of email domains therefore remove from set
-        email_addresses = request.task.tags.get("network.email.address", [])
+        email_addresses = [eml.lower() for eml in request.task.tags.get("network.email.address", [])]
         email_domains = {email.split("@", 1)[-1] for email in email_addresses}
         iocs["domain"] = list(set(iocs["domain"]) - email_domains)
 
         # Filter out URIs that are emails prefixed by http/s
         # (commonly tagged by OLETools but causes phishing heuristic to be raised because of '@')
         def filter_out_http_emails(x):
-            parsed_url = urlparse(x)
+            parsed_url = urlparse(x.lower())
             if (
                 parsed_url.scheme.startswith("http")
                 and parsed_url.netloc in email_addresses
