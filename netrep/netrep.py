@@ -163,7 +163,7 @@ class NetRep(ServiceBase):
                                     b64_string += b"=" * (4 - remaining_characters)
                                 # Imperfect length and padding with 3 "=" doesn't make sense, start removing characters
                                 else:
-                                    b64_string = b64_string[:-3]
+                                    b64_string = b64_string[:-1]
 
                                 scan_result = md.scan(b64_string)
 
