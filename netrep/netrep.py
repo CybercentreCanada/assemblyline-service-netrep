@@ -24,7 +24,7 @@ NETWORK_IOC_TYPES = ["domain", "ip", "uri"]
 class NetRep(ServiceBase):
     def __init__(self, config=None):
         super(NetRep, self).__init__(config)
-        self.blocklists: Dict[str, Dict] = None
+        self.blocklists: Dict[str, Dict] = {}
 
         self.top_domain: Set[str] = set()
         top_domain_file = os.environ.get("TOP_DOMAIN_CSV", "cloudflare-radar-domains-top-2000")
