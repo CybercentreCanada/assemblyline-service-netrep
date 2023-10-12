@@ -6,7 +6,7 @@ ENV SERVICE_PATH netrep.netrep.NetRep
 USER root
 
 RUN apt update -y && apt upgrade -y
-RUN pip install ail-typo-squatting==2.4.3
+RUN pip install ail-typo-squatting==2.4.3 multidecoder==1.0.0
 
 # Switch to assemblyline user
 USER assemblyline

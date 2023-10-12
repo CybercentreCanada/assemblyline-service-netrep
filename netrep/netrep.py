@@ -12,6 +12,11 @@ from assemblyline.odm.base import IP_ONLY_REGEX
 from assemblyline_v4_service.common.api import ServiceAPIError
 from assemblyline_v4_service.common.base import ServiceBase
 from assemblyline_v4_service.common.result import Heuristic, Result, ResultSection, ResultTableSection, TableRow
+from multidecoder.decoders.base64 import BASE64_RE
+from multidecoder.decoders.network import DOMAIN_TYPE, EMAIL_TYPE, IP_TYPE, URL_TYPE, parse_url
+from multidecoder.multidecoder import Multidecoder
+from multidecoder.node import Node
+from multidecoder.string_helper import make_bytes
 
 NETWORK_IOC_TYPES = ["domain", "ip", "uri"]
 
@@ -19,7 +24,7 @@ NETWORK_IOC_TYPES = ["domain", "ip", "uri"]
 class NetRep(ServiceBase):
     def __init__(self, config=None):
         super(NetRep, self).__init__(config)
-        self.blocklists: Dict[str, Dict] = None
+        self.blocklists: Dict[str, Dict] = {}
 
         self.top_domain: Set[str] = set()
         top_domain_file = os.environ.get("TOP_DOMAIN_CSV", "cloudflare-radar-domains-top-2000")
@@ -82,6 +87,84 @@ class NetRep(ServiceBase):
                 if net_ioc_type in k and v not in iocs[net_ioc_type]
                 for x in v
             ]
+
+        # Look for data that might be embedded in URLs
+        md = Multidecoder()
+        url_analysis = ResultSection("URL Analysis")
+        for url in set(iocs["uri"]):
+            analysis_table = ResultTableSection(url[:128] + "..." if len(url) > 128 else url)
+            # Process URL and see if there's any IOCs contained within
+            parsed_url = parse_url(make_bytes(url))
+            query: Node = ([node for node in parsed_url if node.type == "network.url.query"] + [None])[0]
+            fragment: Node = ([node for node in parsed_url if node.type == "network.url.fragment"] + [None])[0]
+
+            # Analyze query/fragment for base64 encoded http | https URLs
+            for segment in [query, fragment]:
+
+                def add_MD_results_to_table(result: Node):
+                    decoded_type = result.children[0].children[0].type
+                    decoded_content = result.children[0].children[0].value.decode()
+                    analysis_table.add_row(
+                        TableRow(
+                            {
+                                "COMPONENT": segment.type.split(".")[-1].upper(),
+                                "ENCODED STRING": result.value.decode(),
+                                "OBFUSCATION": result.children[0].obfuscation,
+                                "DECODED STRING": decoded_content,
+                            }
+                        )
+                    )
+                    if decoded_type == EMAIL_TYPE:
+                        analysis_table.add_tag("network.email.address", decoded_content)
+                    elif decoded_type == URL_TYPE:
+                        analysis_table.add_tag("network.static.uri", decoded_content)
+                        iocs["uri"].append(decoded_content)
+                        # Extract the host and append to tagging/set to be analyzed
+                        host_node = result.children[0].children[0].children[1]
+                        if host_node.type == DOMAIN_TYPE:
+                            analysis_table.add_tag("network.static.domain", host_node.value)
+                            iocs["domain"].append(host_node.value.decode())
+                        elif host_node.type == IP_TYPE:
+                            analysis_table.add_tag("network.static.ip", host_node.value)
+                            iocs["ip"].append(host_node.value.decode())
+
+                    elif decoded_type == DOMAIN_TYPE:
+                        analysis_table.add_tag("network.static.domain", decoded_content)
+                        iocs["domain"].append(decoded_content)
+                    elif decoded_type == IP_TYPE:
+                        analysis_table.add_tag("network.static.ip", decoded_content)
+                        iocs["ip"].append(decoded_content)
+
+                if segment and re.search(BASE64_RE, segment.value):
+                    scan_result = md.scan_node(segment)
+                    if scan_result.children:
+                        # Something was found while analyzing
+                        add_MD_results_to_table(scan_result)
+                    else:
+                        # Nothing was found by MD so we'll have to perform some manual extraction
+                        for b64_match in re.finditer(BASE64_RE, segment.value):
+                            # htt → base64 → aHR0
+                            b64_string = b64_match.group()
+                            if b"aHR0" in b64_string:
+                                b64_string = b64_string[b64_string.index(b"aHR0") :]
+                                remaining_characters = len(b64_string) % 4
+
+                                # Perfect base64 length
+                                if not remaining_characters:
+                                    pass
+                                # Imperfect length, adding padding is required if there's at most 2 characters missing
+                                elif remaining_characters >= 2:
+                                    b64_string += b"=" * (4 - remaining_characters)
+                                # Imperfect length and padding with 3 "=" doesn't make sense, start removing characters
+                                else:
+                                    b64_string = b64_string[:-1]
+
+                                scan_result = md.scan(b64_string)
+
+                                if scan_result.children:
+                                    add_MD_results_to_table(scan_result)
+            if analysis_table.body:
+                url_analysis.add_subsection(analysis_table)
 
         # Check to see if any of the domains tagged are email domains
         # If so, this service isn't qualified to determine the maliciousness of email domains therefore remove from set
@@ -212,5 +295,9 @@ class NetRep(ServiceBase):
 
         if phishing_table.body:
             result.add_section(phishing_table)
+
+        if url_analysis.subsections:
+            # Add section to results
+            result.add_section(url_analysis)
 
         request.result = result
