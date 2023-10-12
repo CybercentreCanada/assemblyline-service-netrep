@@ -90,8 +90,9 @@ class NetRep(ServiceBase):
 
         # Look for data that might be embedded in URLs
         md = Multidecoder()
-        url_analysis = ResultTableSection("URL Analysis")
+        url_analysis = ResultSection("URL Analysis")
         for url in set(iocs["uri"]):
+            analysis_table = ResultTableSection(url[:128] + "..." if len(url) > 128 else url)
             # Process URL and see if there's any IOCs contained within
             parsed_url = parse_url(make_bytes(url))
             query: Node = ([node for node in parsed_url if node.type == "network.url.query"] + [None])[0]
@@ -103,42 +104,35 @@ class NetRep(ServiceBase):
                 def add_MD_results_to_table(result: Node):
                     decoded_type = result.children[0].children[0].type
                     decoded_content = result.children[0].children[0].value.decode()
-                    url_analysis.add_row(
+                    analysis_table.add_row(
                         TableRow(
                             {
-                                "URL": url,
                                 "COMPONENT": segment.type.split(".")[-1].upper(),
-                                "OBFUSCATION": " → ".join(
-                                    [
-                                        result.value.decode(),
-                                        # First layer should be obfuscation technique
-                                        result.children[0].obfuscation,
-                                        # Second layer should be the IOC
-                                        decoded_content,
-                                    ]
-                                ),
+                                "ENCODED STRING": result.value.decode(),
+                                "OBFUSCATION": result.children[0].obfuscation,
+                                "DECODED STRING": decoded_content,
                             }
                         )
                     )
                     if decoded_type == EMAIL_TYPE:
-                        url_analysis.add_tag("network.email.address", decoded_content)
+                        analysis_table.add_tag("network.email.address", decoded_content)
                     elif decoded_type == URL_TYPE:
-                        url_analysis.add_tag("network.static.uri", decoded_content)
+                        analysis_table.add_tag("network.static.uri", decoded_content)
                         iocs["uri"].append(decoded_content)
                         # Extract the host and append to tagging/set to be analyzed
                         host_node = result.children[0].children[0].children[1]
                         if host_node.type == DOMAIN_TYPE:
-                            url_analysis.add_tag("network.static.domain", host_node.value)
+                            analysis_table.add_tag("network.static.domain", host_node.value)
                             iocs["domain"].append(host_node.value.decode())
                         elif host_node.type == IP_TYPE:
-                            url_analysis.add_tag("network.static.ip", host_node.value)
+                            analysis_table.add_tag("network.static.ip", host_node.value)
                             iocs["ip"].append(host_node.value.decode())
 
                     elif decoded_type == DOMAIN_TYPE:
-                        url_analysis.add_tag("network.static.domain", decoded_content)
+                        analysis_table.add_tag("network.static.domain", decoded_content)
                         iocs["domain"].append(decoded_content)
                     elif decoded_type == IP_TYPE:
-                        url_analysis.add_tag("network.static.ip", decoded_content)
+                        analysis_table.add_tag("network.static.ip", decoded_content)
                         iocs["ip"].append(decoded_content)
 
                 if segment and re.search(BASE64_RE, segment.value):
@@ -169,6 +163,8 @@ class NetRep(ServiceBase):
 
                                 if scan_result.children:
                                     add_MD_results_to_table(scan_result)
+            if analysis_table.body:
+                url_analysis.add_subsection(analysis_table)
 
         # Check to see if any of the domains tagged are email domains
         # If so, this service isn't qualified to determine the maliciousness of email domains therefore remove from set
@@ -300,7 +296,7 @@ class NetRep(ServiceBase):
         if phishing_table.body:
             result.add_section(phishing_table)
 
-        if url_analysis.body:
+        if url_analysis.subsections:
             # Add section to results
             result.add_section(url_analysis)
 
