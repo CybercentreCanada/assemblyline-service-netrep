@@ -1,10 +1,12 @@
+import binascii
 import csv
 import json
 import math
 import os
 import re
+from base64 import b64decode
 from collections import defaultdict
-from typing import Dict, Set
+from typing import Dict, List, Set, Tuple
 from urllib.parse import urlparse
 
 from ail_typo_squatting import runAll
@@ -16,9 +18,143 @@ from multidecoder.decoders.base64 import BASE64_RE
 from multidecoder.decoders.network import DOMAIN_TYPE, EMAIL_TYPE, IP_TYPE, URL_TYPE, parse_url
 from multidecoder.multidecoder import Multidecoder
 from multidecoder.node import Node
-from multidecoder.string_helper import make_bytes
+from multidecoder.string_helper import make_bytes, make_str
 
 NETWORK_IOC_TYPES = ["domain", "ip", "uri"]
+
+
+def url_analysis(url: str) -> Tuple[ResultTableSection, Dict[str, List[str]]]:
+    md = Multidecoder()
+
+    analysis_table = ResultTableSection(url[:128] + "..." if len(url) > 128 else url)
+    network_iocs = {"uri": [], "domain": [], "ip": []}
+
+    def add_MD_results_to_table(result: Node):
+        if result.obfuscation:
+            # Analysis pertains to deobfuscated content
+            analysis_table.add_row(
+                TableRow(
+                    {
+                        "COMPONENT": segment.type.split(".")[-1].upper(),
+                        "ENCODED STRING": make_str(result.original),
+                        "OBFUSCATION": result.obfuscation,
+                        "DECODED STRING": make_str(result.value),
+                    }
+                )
+            )
+
+            # Overwrite result for tagging
+            if result.children:
+                result = result.children[0]
+        elif result.type == URL_TYPE:
+            # Analysis pertains to URL that was extracted from parent (assume URL encoding)
+            inner_url = make_str(result.value)
+            analysis_table.add_row(
+                TableRow(
+                    {
+                        "COMPONENT": segment.type.split(".")[-1].upper(),
+                        "ENCODED STRING": make_str(result.parent.value),
+                        "OBFUSCATION": "encoding.url",
+                        "DECODED STRING": inner_url,
+                    }
+                )
+            )
+            inner_analysis_section, inner_network_iocs = url_analysis(inner_url)
+            if inner_analysis_section.body:
+                # If we were able to analyze anything of interest recursively, append to result
+                analysis_table.add_subsection(inner_analysis_section)
+                # Merge found IOCs
+                for ioc_type in NETWORK_IOC_TYPES:
+                    network_iocs[ioc_type] = network_iocs[ioc_type] + inner_network_iocs[ioc_type]
+
+        tagged_type, tagged_content = result.type, make_str(result.value)
+        if tagged_type == EMAIL_TYPE:
+            analysis_table.add_tag("network.email.address", tagged_content)
+        elif tagged_type == URL_TYPE:
+            analysis_table.add_tag("network.static.uri", tagged_content)
+            network_iocs["uri"].append(tagged_content)
+            # Extract the host and append to tagging/set to be analyzed
+            host_node = result.children[1]
+            if host_node.type == DOMAIN_TYPE:
+                analysis_table.add_tag("network.static.domain", host_node.value)
+                network_iocs["domain"].append(host_node.value.decode())
+            elif host_node.type == IP_TYPE:
+                analysis_table.add_tag("network.static.ip", host_node.value)
+                network_iocs["ip"].append(host_node.value.decode())
+
+        elif tagged_type == DOMAIN_TYPE:
+            analysis_table.add_tag("network.static.domain", tagged_content)
+            network_iocs["domain"].append(tagged_content)
+        elif tagged_type == IP_TYPE:
+            analysis_table.add_tag("network.static.ip", tagged_content)
+            network_iocs["ip"].append(tagged_content)
+
+    # Process URL and see if there's any IOCs contained within
+    parsed_url = parse_url(make_bytes(url))
+    query: Node = ([node for node in parsed_url if node.type == "network.url.query"] + [None])[0]
+    fragment: Node = ([node for node in parsed_url if node.type == "network.url.fragment"] + [None])[0]
+
+    # Analyze query/fragment
+    for segment in [query, fragment]:
+        if segment:
+            scan_result = md.scan_node(segment)
+            if scan_result.children:
+                # Something was found while analyzing
+                for child in scan_result.children:
+                    add_MD_results_to_table(child)
+            #  Check for base64 encoded http | https URLs that MD didn't initially detect
+            elif re.search(BASE64_RE, segment.value):
+                # Nothing was found by MD so we'll have to perform some manual extraction
+                for b64_match in re.finditer(BASE64_RE, segment.value):
+                    # htt → base64 → aHR0
+                    b64_string = b64_match.group()
+                    if b"aHR0" in b64_string:
+                        b64_string = b64_string[b64_string.index(b"aHR0") :]
+                        remaining_characters = len(b64_string) % 4
+
+                        # Perfect base64 length
+                        if not remaining_characters:
+                            pass
+                        # Imperfect length, adding padding is required if there's at most 2 characters missing
+                        elif remaining_characters >= 2:
+                            b64_string += b"=" * (4 - remaining_characters)
+                        # Imperfect length and padding with 3 "=" doesn't make sense, start removing characters
+                        else:
+                            b64_string = b64_string[:-1]
+
+                        scan_result = md.scan(b64_string)
+
+                        if scan_result.children:
+                            for child in scan_result.children:
+                                add_MD_results_to_table(child)
+                        else:
+                            try:
+                                # Attempt decoding manually
+                                scan_result = md.scan(b64decode(b64_string))
+                                # Manipulate the result to preserve the encoded → decoded process
+                                scan_result = Node(
+                                    "",
+                                    b64_string,
+                                    "",
+                                    0,
+                                    0,
+                                    None,
+                                    children=[
+                                        Node(
+                                            "",
+                                            scan_result.value,
+                                            "encoding.base64",
+                                            0,
+                                            0,
+                                            None,
+                                            children=scan_result.children,
+                                        )
+                                    ],
+                                )
+                                add_MD_results_to_table(scan_result.children[0])
+                            except binascii.Error:
+                                pass
+    return analysis_table, network_iocs
 
 
 class NetRep(ServiceBase):
@@ -89,82 +225,14 @@ class NetRep(ServiceBase):
             ]
 
         # Look for data that might be embedded in URLs
-        md = Multidecoder()
-        url_analysis = ResultSection("URL Analysis")
+        url_analysis_section = ResultSection("URL Analysis")
         for url in set(iocs["uri"]):
-            analysis_table = ResultTableSection(url[:128] + "..." if len(url) > 128 else url)
-            # Process URL and see if there's any IOCs contained within
-            parsed_url = parse_url(make_bytes(url))
-            query: Node = ([node for node in parsed_url if node.type == "network.url.query"] + [None])[0]
-            fragment: Node = ([node for node in parsed_url if node.type == "network.url.fragment"] + [None])[0]
-
-            # Analyze query/fragment for base64 encoded http | https URLs
-            for segment in [query, fragment]:
-
-                def add_MD_results_to_table(result: Node):
-                    decoded_type = result.children[0].children[0].type
-                    decoded_content = result.children[0].children[0].value.decode()
-                    analysis_table.add_row(
-                        TableRow(
-                            {
-                                "COMPONENT": segment.type.split(".")[-1].upper(),
-                                "ENCODED STRING": result.value.decode(),
-                                "OBFUSCATION": result.children[0].obfuscation,
-                                "DECODED STRING": decoded_content,
-                            }
-                        )
-                    )
-                    if decoded_type == EMAIL_TYPE:
-                        analysis_table.add_tag("network.email.address", decoded_content)
-                    elif decoded_type == URL_TYPE:
-                        analysis_table.add_tag("network.static.uri", decoded_content)
-                        iocs["uri"].append(decoded_content)
-                        # Extract the host and append to tagging/set to be analyzed
-                        host_node = result.children[0].children[0].children[1]
-                        if host_node.type == DOMAIN_TYPE:
-                            analysis_table.add_tag("network.static.domain", host_node.value)
-                            iocs["domain"].append(host_node.value.decode())
-                        elif host_node.type == IP_TYPE:
-                            analysis_table.add_tag("network.static.ip", host_node.value)
-                            iocs["ip"].append(host_node.value.decode())
-
-                    elif decoded_type == DOMAIN_TYPE:
-                        analysis_table.add_tag("network.static.domain", decoded_content)
-                        iocs["domain"].append(decoded_content)
-                    elif decoded_type == IP_TYPE:
-                        analysis_table.add_tag("network.static.ip", decoded_content)
-                        iocs["ip"].append(decoded_content)
-
-                if segment and re.search(BASE64_RE, segment.value):
-                    scan_result = md.scan_node(segment)
-                    if scan_result.children:
-                        # Something was found while analyzing
-                        add_MD_results_to_table(scan_result)
-                    else:
-                        # Nothing was found by MD so we'll have to perform some manual extraction
-                        for b64_match in re.finditer(BASE64_RE, segment.value):
-                            # htt → base64 → aHR0
-                            b64_string = b64_match.group()
-                            if b"aHR0" in b64_string:
-                                b64_string = b64_string[b64_string.index(b"aHR0") :]
-                                remaining_characters = len(b64_string) % 4
-
-                                # Perfect base64 length
-                                if not remaining_characters:
-                                    pass
-                                # Imperfect length, adding padding is required if there's at most 2 characters missing
-                                elif remaining_characters >= 2:
-                                    b64_string += b"=" * (4 - remaining_characters)
-                                # Imperfect length and padding with 3 "=" doesn't make sense, start removing characters
-                                else:
-                                    b64_string = b64_string[:-1]
-
-                                scan_result = md.scan(b64_string)
-
-                                if scan_result.children:
-                                    add_MD_results_to_table(scan_result)
+            analysis_table, iocs_extracted = url_analysis(url)
             if analysis_table.body:
-                url_analysis.add_subsection(analysis_table)
+                url_analysis_section.add_subsection(analysis_table)
+                # Merge found IOCs into list for reputation checks
+                for ioc_type in NETWORK_IOC_TYPES:
+                    iocs[ioc_type] = iocs[ioc_type] + iocs_extracted[ioc_type]
 
         # Check to see if any of the domains tagged are email domains
         # If so, this service isn't qualified to determine the maliciousness of email domains therefore remove from set
@@ -296,8 +364,8 @@ class NetRep(ServiceBase):
         if phishing_table.body:
             result.add_section(phishing_table)
 
-        if url_analysis.subsections:
+        if url_analysis_section.subsections:
             # Add section to results
-            result.add_section(url_analysis)
+            result.add_section(url_analysis_section)
 
         request.result = result
