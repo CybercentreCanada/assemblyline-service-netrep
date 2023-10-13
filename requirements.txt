@@ -1,0 +1,2 @@
+ail-typo-squatting==2.4.3
+multidecoder==1.0.0
