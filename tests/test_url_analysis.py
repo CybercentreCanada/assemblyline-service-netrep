@@ -14,6 +14,12 @@ def test_embedded_base64():
         "network.email.address": ["test@example.com"],
     }
 
+    # Handle garbage base64 strings, this shouldn't generate any results
+    url = "https://somedomain.com/some/path?u=2F4wOWl6vSIfij9tBVr7MyOThiV1"
+    res_section, network_iocs = url_analysis(url)
+    assert network_iocs == {"uri": [], "domain": [], "ip": []}
+    assert not res_section.body
+
 
 def test_safelinks():
     # Ref: https://learn.microsoft.com/en-us/microsoft-365/security/office-365-security/safe-links-about?view=o365-worldwide

@@ -31,6 +31,13 @@ def url_analysis(url: str) -> Tuple[ResultTableSection, Dict[str, List[str]]]:
 
     def add_MD_results_to_table(result: Node):
         if result.obfuscation:
+            try:
+                # Attempt to decode decoded string
+                result.value.decode()
+            except UnicodeDecodeError:
+                # Garbage string decoded
+                return
+
             # Analysis pertains to deobfuscated content
             analysis_table.add_row(
                 TableRow(
