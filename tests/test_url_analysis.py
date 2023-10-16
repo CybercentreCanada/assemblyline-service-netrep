@@ -32,3 +32,11 @@ def test_safelinks():
         # Recipient email address
         "network.email.address": ["test@example.com"],
     }
+
+
+def test_hexed_ip():
+    # Ref: https://www.darkreading.com/cloud/shellbot-cracks-linux-ssh-servers-debuts-new-evasion-tactic
+    url = "http://0x7f000001"
+    res_section, network_iocs = url_analysis(url)
+    assert network_iocs["ip"] == ["127.0.0.1"]
+    assert res_section.tags == {"network.static.ip": ["127.0.0.1"]}

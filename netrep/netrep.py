@@ -91,12 +91,20 @@ def url_analysis(url: str) -> Tuple[ResultTableSection, Dict[str, List[str]]]:
 
     # Process URL and see if there's any IOCs contained within
     parsed_url = parse_url(make_bytes(url))
+    host: Node = ([node for node in parsed_url if node.type == "network.ip"] + [None])[0]
     query: Node = ([node for node in parsed_url if node.type == "network.url.query"] + [None])[0]
     fragment: Node = ([node for node in parsed_url if node.type == "network.url.fragment"] + [None])[0]
 
     # Analyze query/fragment
-    for segment in [query, fragment]:
+    for segment in [host, query, fragment]:
         if segment:
+            if segment.type == "network.ip":
+                # Check for IP obfuscation
+                if segment.obfuscation:
+                    # Add original URL as a parent node
+                    if not segment.parent:
+                        segment.parent = Node("network.url", url)
+                    add_MD_results_to_table(segment)
             scan_result = md.scan_node(segment)
             if scan_result.children:
                 # Something was found while analyzing
