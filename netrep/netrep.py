@@ -98,9 +98,47 @@ def url_analysis(url: str) -> Tuple[ResultTableSection, Dict[str, List[str]]]:
 
     # Process URL and see if there's any IOCs contained within
     parsed_url = parse_url(make_bytes(url))
-    host: Node = ([node for node in parsed_url if node.type == "network.ip"] + [None])[0]
+    scheme: Node = ([node for node in parsed_url if node.type == "network.url.scheme"] + [None])[0]
+    host: Node = ([node for node in parsed_url if node.type in ["network.ip", "network.domain"]] + [None])[0]
+    username: Node = ([node for node in parsed_url if node.type == "network.url.username"] + [None])[0]
     query: Node = ([node for node in parsed_url if node.type == "network.url.query"] + [None])[0]
     fragment: Node = ([node for node in parsed_url if node.type == "network.url.fragment"] + [None])[0]
+
+    # Check to see if there's anything "phishy" about the URL
+    if username and host.type == "network.domain":
+        scheme = "http" if not scheme else scheme.value.decode()
+        domain = host.value.decode()
+        target_url = f"{scheme}://{url[url.index(domain):]}"
+        if b"@" in username.value:
+            # Looks like URL might be masking the actual target
+            analysis_table.add_row(
+                TableRow(
+                    {
+                        "COMPONENT": "URL",
+                        "ENCODED STRING": url,
+                        "OBFUSCATION": "URL masquerade",
+                        "DECODED STRING": target_url,
+                    }
+                )
+            )
+            analysis_table.set_heuristic(4, signature="url_masquerade")
+        else:
+            # This URL has auth details embedded in the URL, weird
+            analysis_table.add_row(
+                TableRow(
+                    {
+                        "COMPONENT": "URL",
+                        "ENCODED STRING": url,
+                        "OBFUSCATION": "Embedded credentials",
+                        "DECODED STRING": target_url,
+                    }
+                )
+            )
+            analysis_table.set_heuristic(4, signature="embedded_credentials")
+        analysis_table.add_tag("network.static.uri", url)
+        analysis_table.add_tag("network.static.uri", target_url)
+        network_iocs["uri"].append(target_url)
+        network_iocs["domain"].append(domain)
 
     # Analyze query/fragment
     for segment in [host, query, fragment]:
@@ -308,7 +346,10 @@ class NetRep(ServiceBase):
                         if doc.get(extra_info):
                             row_data[extra_info.upper()] = doc[extra_info]
 
-                    section.add_row(TableRow(row_data))
+                    row_data = TableRow(row_data)
+                    if row_data not in section.section_body._data:
+                        # If we haven't seen this record before, then add it to the table
+                        section.add_row(row_data)
 
                     section.add_tag(f"network.static.{ioc_type}", ioc_value)
                     [section.add_tag("attribution.family", f) for f in doc["malware_family"]]
@@ -366,18 +407,6 @@ class NetRep(ServiceBase):
 
             if typo_table.body:
                 result.add_section(typo_table)
-
-        # Phishing techniques
-        phishing_table = ResultTableSection("Suspected Phishing URIs", heuristic=Heuristic(4))
-        for uri in iocs["uri"]:
-            parsed_url = urlparse(uri)
-
-            if parsed_url.username or parsed_url.password:
-                phishing_table.add_row(TableRow({"URI": uri, "Reason": "Basic authentication included in URI"}))
-                phishing_table.add_tag("network.static.uri", uri)
-
-        if phishing_table.body:
-            result.add_section(phishing_table)
 
         if url_analysis_section.subsections:
             # Add section to results

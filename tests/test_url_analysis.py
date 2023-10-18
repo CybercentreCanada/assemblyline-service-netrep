@@ -46,3 +46,19 @@ def test_hexed_ip():
     res_section, network_iocs = url_analysis(url)
     assert network_iocs["ip"] == ["127.0.0.1"]
     assert res_section.tags == {"network.static.ip": ["127.0.0.1"]}
+
+
+def test_phishing():
+    # Ref: https://www.vmray.com/cyber-security-blog/detection-signature-updates-2/#elementor-toc__heading-anchor-9
+    url = "https://google.com@wellsfargo.com@micrsoft.com@adobe.com@bad.com/malicious.zip?evil=true"
+    res_section, network_iocs = url_analysis(url)
+    # Should reveal the true target URL for reputation checking
+    assert network_iocs["uri"] == ["https://bad.com/malicious.zip?evil=true"]
+    assert network_iocs["domain"] == ["bad.com"]
+    assert '"OBFUSCATION": "URL masquerade"' in res_section.body
+
+    url = "https://username@bad.com/"
+    res_section, network_iocs = url_analysis(url)
+    assert network_iocs["uri"] == ["https://bad.com/"]
+    assert network_iocs["domain"] == ["bad.com"]
+    assert '"OBFUSCATION": "Embedded credentials"' in res_section.body
