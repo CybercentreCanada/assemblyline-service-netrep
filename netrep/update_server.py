@@ -111,7 +111,8 @@ class NetRepUpdateServer(ServiceUpdater):
                 return []
 
             # Normalize data (parsing based off Malpedia API output)
-            data = data.replace("-", "").replace("_", "").replace("#", "").lower()
+            data = data.split(".", 1)[-1]
+            data = data.replace("-", "").replace("_", "").replace("#", "").replace('"', "").lower()
             data = data.split(",") if "," in data else [data]
 
             if not validate:
@@ -126,6 +127,7 @@ class NetRepUpdateServer(ServiceUpdater):
             ioc_type: str, ioc_value: str, malware_family: List[str], attribution: List[str], references: List[str]
         ):
             blocklist.setdefault(ioc_type, {})
+            references = [r for r in references if re.match(FULL_URI, r)]
 
             # Normalize IOC values for when performing lookups
             ioc_value = ioc_value.lower()
@@ -180,12 +182,12 @@ class NetRepUpdateServer(ServiceUpdater):
                 for file, _ in files_sha256:
                     with open(file, "r") as fp:
                         for row in list(csv.reader(fp, delimiter=","))[start_index:]:
+                            row = [r.strip(' "') for r in row]
                             joined_row = ",".join(row)
-                            if any(t in joined_row for t in ignore_terms):
+                            if any(t in joined_row for t in ignore_terms) or joined_row.startswith("#"):
                                 # Skip row
                                 continue
 
-                            references = [] if not source_cfg.get("reference") else [row[source_cfg["reference"]]]
                             references = [] if not source_cfg.get("reference") else [row[source_cfg["reference"]]]
                             # Get malware family
                             malware_family = (
@@ -206,6 +208,10 @@ class NetRepUpdateServer(ServiceUpdater):
                                 if source_cfg.get(ioc_type) is None:
                                     continue
                                 ioc_value = row[source_cfg[ioc_type]]
+
+                                if ioc_type == "ip":
+                                    # Ensure port information is not included
+                                    ioc_value = ioc_value.split(":", 1)[0]
 
                                 # If there are multiple IOC types in the same column, verify the IOC type
                                 if not IOC_CHECK[ioc_type](ioc_value):
@@ -251,7 +257,7 @@ class NetRepUpdateServer(ServiceUpdater):
                             self.malware_families = self.malware_families.union(
                                 set(
                                     sanitize_data(
-                                        malware_family.split(".", 1)[-1],
+                                        malware_family,
                                         type="malware_family",
                                         validate=False,
                                     )
