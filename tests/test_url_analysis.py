@@ -1,4 +1,4 @@
-from netrep.netrep import url_analysis
+from netrep.utils.network import url_analysis
 
 
 def test_unicode_characters():
