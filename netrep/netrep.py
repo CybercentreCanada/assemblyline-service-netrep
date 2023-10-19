@@ -74,6 +74,10 @@ def url_analysis(url: str) -> Tuple[ResultTableSection, Dict[str, List[str]]]:
                 for ioc_type in NETWORK_IOC_TYPES:
                     network_iocs[ioc_type] = network_iocs[ioc_type] + inner_network_iocs[ioc_type]
 
+        if result.parent.type == result.type:
+            # This value is derived from the parent which has the "correct" component value
+            result.value = result.parent.value
+
         tagged_type, tagged_content = result.type, make_str(result.value)
         if tagged_type == EMAIL_TYPE:
             analysis_table.add_tag("network.email.address", tagged_content)
@@ -97,7 +101,29 @@ def url_analysis(url: str) -> Tuple[ResultTableSection, Dict[str, List[str]]]:
             network_iocs["ip"].append(tagged_content)
 
     # Process URL and see if there's any IOCs contained within
-    parsed_url = parse_url(make_bytes(url))
+    try:
+        parsed_url = parse_url(make_bytes(url))
+    except UnicodeDecodeError:
+        parsed_url = []
+        for component, value in urlparse(url)._asdict().items():
+            if component == "netloc":
+                host = value
+                username = password = None
+                if "@" in host:
+                    password = None
+                    username, host = host.rsplit("@", 1)
+                    if ":" in username:
+                        username, password = username.split(":", 1)
+                parsed_url.append(
+                    Node("network.ip" if re.match(IP_ONLY_REGEX, host) else "network.domain", make_bytes(host))
+                )
+                if username:
+                    parsed_url.append(Node("network.url.username", make_bytes(username)))
+                if password:
+                    parsed_url.append(Node("network.url.password", make_bytes(password)))
+            else:
+                parsed_url.append(Node(f"network.url.{component}", make_bytes(value)))
+
     scheme: Node = ([node for node in parsed_url if node.type == "network.url.scheme"] + [None])[0]
     host: Node = ([node for node in parsed_url if node.type in ["network.ip", "network.domain"]] + [None])[0]
     username: Node = ([node for node in parsed_url if node.type == "network.url.username"] + [None])[0]
@@ -207,7 +233,7 @@ def url_analysis(url: str) -> Tuple[ResultTableSection, Dict[str, List[str]]]:
                                 add_MD_results_to_table(scan_result.children[0])
                             except binascii.Error:
                                 pass
-    return analysis_table, network_iocs
+    return analysis_table, {k: list(set(v)) for k, v in network_iocs.items()}
 
 
 class NetRep(ServiceBase):
