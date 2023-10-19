@@ -83,6 +83,15 @@ config:
       ip: ip_address
       domain: hostname
       malware_family: malware
+    threatfox:
+      type: blocklist
+      format: csv
+      start: 9
+      ip: 2
+      domain: 2
+      uri: 2
+      malware_family: 5
+      reference: 10
     malpedia:
       type: malware_family_list
       format: list
@@ -132,5 +141,8 @@ update_config:
     - name: feodotracker
       uri: https://feodotracker.abuse.ch/downloads/ipblocklist.json
       pattern: .*ipblocklist\.json
+    - name: threatfox
+      uri: https://threatfox.abuse.ch/export/csv/full
+      pattern: .*\.csv
   update_interval_seconds: 900 # Every 15 minutes
   wait_for_update: true
