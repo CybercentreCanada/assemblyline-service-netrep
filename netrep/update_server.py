@@ -184,7 +184,7 @@ class NetRepUpdateServer(ServiceUpdater):
                         for row in list(csv.reader(fp, delimiter=","))[start_index:]:
                             row = [r.strip(' "') for r in row]
                             joined_row = ",".join(row)
-                            if any(t in joined_row for t in ignore_terms):
+                            if any(t in joined_row for t in ignore_terms) or joined_row.startswith("#"):
                                 # Skip row
                                 continue
 
