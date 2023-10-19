@@ -1,6 +1,14 @@
 from netrep.netrep import url_analysis
 
 
+def test_unicode_characters():
+    # Shouldn't crash due to non-ASCII characters being in the URL
+    url = "https://hello:world@écoute.com/"
+    res_section, network_iocs = url_analysis(url)
+    assert network_iocs == {"uri": ["https://écoute.com/"], "domain": ["écoute.com"], "ip": []}
+    assert '"OBFUSCATION": "Embedded credentials"' in res_section.body
+
+
 def test_embedded_base64():
     url = "https://somedomain.com/some/path?u=a1aHR0cHM6Ly9iYWQuY29t#dGVzdEBleGFtcGxlLmNvbQ=="
     res_section, network_iocs = url_analysis(url)
