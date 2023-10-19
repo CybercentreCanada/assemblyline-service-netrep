@@ -85,8 +85,10 @@ def url_analysis(url: str) -> Tuple[ResultTableSection, Dict[str, List[str]]]:
             analysis_table.add_tag("network.static.uri", tagged_content)
             network_iocs["uri"].append(tagged_content)
             # Extract the host and append to tagging/set to be analyzed
-            host_node = result.children[1]
-            if host_node.type == DOMAIN_TYPE:
+            host_node = ([node for node in parsed_url if node.type in ["network.ip", "network.domain"]] + [None])[0]
+            if not host_node:
+                pass
+            elif host_node.type == DOMAIN_TYPE:
                 analysis_table.add_tag("network.static.domain", host_node.value)
                 network_iocs["domain"].append(host_node.value.decode())
             elif host_node.type == IP_TYPE:
