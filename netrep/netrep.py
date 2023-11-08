@@ -92,6 +92,10 @@ class NetRep(ServiceBase):
 
         if request.file_type.startswith("uri/"):
             iocs["uri"].append(request.task.fileinfo.uri_info.uri)
+            if re.match(IP_ONLY_REGEX, request.task.fileinfo.uri_info.hostname):
+                iocs["ip"].append(request.task.fileinfo.uri_info.hostname)
+            else:
+                iocs["domain"].append(request.task.fileinfo.uri_info.hostname)
 
         # Filter out URIs that are emails prefixed by http/s
         # (commonly tagged by OLETools but causes phishing heuristic to be raised because of '@')
