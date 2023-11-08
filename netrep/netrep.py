@@ -11,6 +11,7 @@ from ail_typo_squatting import runAll
 from assemblyline.odm.base import IP_ONLY_REGEX
 from assemblyline_v4_service.common.api import ServiceAPIError
 from assemblyline_v4_service.common.base import ServiceBase
+from assemblyline_v4_service.common.request import ServiceRequest
 from assemblyline_v4_service.common.result import Heuristic, Result, ResultSection, ResultTableSection, TableRow
 
 from netrep.utils.network import NETWORK_IOC_TYPES, url_analysis
@@ -69,7 +70,7 @@ class NetRep(ServiceBase):
         else:
             self.log.warning("Reputation list missing. Service will only perform typosquatting detection..")
 
-    def execute(self, request):
+    def execute(self, request: ServiceRequest):
         result = Result()
 
         # Gather existing network tags from AL
@@ -88,6 +89,9 @@ class NetRep(ServiceBase):
         email_addresses = [eml.lower() for eml in request.task.tags.get("network.email.address", [])]
         email_domains = {email.split("@", 1)[-1] for email in email_addresses}
         iocs["domain"] = list(set(iocs["domain"]) - email_domains)
+
+        if request.file_type.startswith("uri/"):
+            iocs["uri"].append(request.task.fileinfo.uri_info.uri)
 
         # Filter out URIs that are emails prefixed by http/s
         # (commonly tagged by OLETools but causes phishing heuristic to be raised because of '@')
