@@ -76,6 +76,7 @@ class NetRep(ServiceBase):
         # Gather existing network tags from AL
         iocs = defaultdict(list)
 
+        disable_host_check = request.get_param('disable_host_check', False)
         for net_ioc_type in NETWORK_IOC_TYPES:
             [
                 iocs[net_ioc_type].append(x)
@@ -145,6 +146,10 @@ class NetRep(ServiceBase):
             # Check to see if IOCs are known to have a bad reputation
             for ioc_type, ioc_values in iocs.items():
                 if not ioc_values:
+                    continue
+
+                if ioc_type in ['domain', 'ip'] and disable_host_check:
+                    # We're not going to perform any checks against a IP/domain
                     continue
 
                 # Determine if any of the IOCs are within the known bad lists
