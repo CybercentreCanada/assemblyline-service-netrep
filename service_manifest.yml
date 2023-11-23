@@ -48,6 +48,10 @@ submission_params:
     value: true
     default: true
     type: bool
+  - name: disable_host_check
+    value: false
+    default: false
+    type: bool
 
 config:
   updater:
