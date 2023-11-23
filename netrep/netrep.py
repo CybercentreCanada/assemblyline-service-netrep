@@ -76,7 +76,7 @@ class NetRep(ServiceBase):
         # Gather existing network tags from AL
         iocs = defaultdict(list)
 
-        disable_host_check = request.get_param('disable_host_check', False)
+        disable_host_check = request.get_param('disable_host_check')
         for net_ioc_type in NETWORK_IOC_TYPES:
             [
                 iocs[net_ioc_type].append(x)
