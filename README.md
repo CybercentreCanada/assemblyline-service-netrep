@@ -1,3 +1,8 @@
+# DEPRECATED:
+Replaced by:
+ - [assemblyline-service-badlist](https://github.com/CybercentreCanada/assemblyline-service-badlist)
+ - [assemblyline-service-urlcreator](https://github.com/CybercentreCanada/assemblyline-service-urlcreator)
+
 # Network Reputation (NetRep) Service
 
 Assemblyline service that flags network IOCs for belonging to known bad lists or believed to be phishing related
